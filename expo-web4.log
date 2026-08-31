@@ -1,0 +1,22 @@
+Starting project at E:\vs code\Test_app\sportzfy
+Starting Metro Bundler
+Waiting on http://localhost:8082
+Logs for your project will appear below.
+Web Bundled 2706ms E:\vs code\Test_app\sportzfy\node_modules\expo\AppEntry.js (538 modules)
+Web Bundled 28ms E:\vs code\Test_app\sportzfy\node_modules\expo\AppEntry.js (1 module)
+Web Bundling failed 653ms E:\vs code\Test_app\sportzfy\node_modules\expo\AppEntry.js (1 module)
+Unable to resolve "../components/Header" from "src\screens\customer\HomeScreen.js"
+Web Bundling failed 29ms E:\vs code\Test_app\sportzfy\node_modules\expo\AppEntry.js (1 module)
+Unable to resolve "../components/Header" from "src\screens\customer\HomeScreen.js"
+Web Bundling failed 23ms E:\vs code\Test_app\sportzfy\node_modules\expo\AppEntry.js (1 module)
+Unable to resolve "../components/Header" from "src\screens\customer\HomeScreen.js"
+Web Bundling failed 22ms E:\vs code\Test_app\sportzfy\node_modules\expo\AppEntry.js (1 module)
+Unable to resolve "../components/Header" from "src\screens\customer\HomeScreen.js"
+Web Bundling failed 22ms E:\vs code\Test_app\sportzfy\node_modules\expo\AppEntry.js (1 module)
+Unable to resolve "../components/Header" from "src\screens\customer\HomeScreen.js"
+Web Bundling failed 23ms E:\vs code\Test_app\sportzfy\node_modules\expo\AppEntry.js (1 module)
+Unable to resolve "../components/Header" from "src\screens\customer\HomeScreen.js"
+Web Bundling failed 21ms E:\vs code\Test_app\sportzfy\node_modules\expo\AppEntry.js (1 module)
+Unable to resolve "../components/Header" from "src\screens\customer\HomeScreen.js"
+Web Bundling failed 23ms E:\vs code\Test_app\sportzfy\node_modules\expo\AppEntry.js (1 module)
+Unable to resolve "../components/Header" from "src\screens\customer\HomeScreen.js"
