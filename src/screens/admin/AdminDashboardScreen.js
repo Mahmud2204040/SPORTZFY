@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -37,6 +37,7 @@ export default function AdminDashboardScreen() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [pendingDecision, setPendingDecision] = useState(null);
 
   const load = useCallback(async (pull = false) => {
     if (pull) setRefreshing(true); else setLoading(true);
@@ -54,7 +55,7 @@ export default function AdminDashboardScreen() {
   const pendingCount = turfs.filter(t => t.status === 'PENDING_REVIEW').length;
 
   async function openDetail(id) {
-    setDetail({ id }); setDetailLoading(true); setDetailError(''); setNotice('');
+    setDetail({ id }); setDetailLoading(true); setDetailError(''); setNotice(''); setPendingDecision(null);
     try { setDetail(await adminApi.getTurf(id)); }
     catch (error) { setDetailError(error?.message || 'Could not load submission details.'); }
     finally { setDetailLoading(false); }
@@ -62,11 +63,7 @@ export default function AdminDashboardScreen() {
 
   function confirmReview(nextStatus) {
     if (!detail?.id || busy) return;
-    Alert.alert(
-      nextStatus === 'APPROVED' ? 'Approve venue?' : 'Reject venue?',
-      `${detail.name} will be ${nextStatus === 'APPROVED' ? 'visible to players after approval' : 'marked as rejected'}.`,
-      [{ text: 'Cancel', style: 'cancel' }, { text: nextStatus === 'APPROVED' ? 'Approve' : 'Reject', style: nextStatus === 'REJECTED' ? 'destructive' : 'default', onPress: () => review(nextStatus) }]
-    );
+    setPendingDecision(nextStatus);
   }
 
   async function review(nextStatus) {
@@ -75,6 +72,7 @@ export default function AdminDashboardScreen() {
     try {
       const reviewed = await adminApi.reviewTurf(detail.id, nextStatus);
       setDetail(null);
+      setPendingDecision(null);
       setNotice(`${reviewed.name} ${nextStatus === 'APPROVED' ? 'approved' : 'rejected'} successfully.`);
       await load(true);
     } catch (error) {
@@ -104,9 +102,9 @@ export default function AdminDashboardScreen() {
       </View> : null}
     </ScrollView>
 
-    <Modal visible={!!detail} animationType="slide" onRequestClose={() => !busy && setDetail(null)}>
+    <Modal visible={!!detail} animationType="slide" onRequestClose={() => { if (!busy) { setDetail(null); setPendingDecision(null); } }}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.modalHeader}><View><Text style={styles.eyebrow}>VENUE SUBMISSION</Text><Text style={styles.modalTitle}>Review details</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Close review details" disabled={busy} onPress={() => setDetail(null)} style={styles.closeButton}><Ionicons name="close" size={24} color={COLORS.textPrimary}/></Pressable></View>
+        <View style={styles.modalHeader}><View><Text style={styles.eyebrow}>VENUE SUBMISSION</Text><Text style={styles.modalTitle}>Review details</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Close review details" disabled={busy} onPress={() => { setDetail(null); setPendingDecision(null); }} style={styles.closeButton}><Ionicons name="close" size={24} color={COLORS.textPrimary}/></Pressable></View>
         <ScrollView contentContainerStyle={styles.modalContent}>
           {detailLoading ? <View style={styles.state}><ActivityIndicator color={COLORS.primaryDark}/><Text style={styles.stateText}>Loading venue details…</Text></View> : detailError && !detail?.name ? <View style={styles.state}><Text style={styles.errorText}>{detailError}</Text><Pressable onPress={() => openDetail(detail.id)} style={styles.retry}><Text style={styles.retryText}>Retry</Text></Pressable></View> : detail?.name ? <>
             {detail.coverImage ? <Image source={{ uri: detail.coverImage }} style={styles.cover} /> : null}
@@ -118,7 +116,7 @@ export default function AdminDashboardScreen() {
             {detailError ? <Text accessibilityRole="alert" style={styles.errorText}>{detailError}</Text> : null}
           </> : null}
         </ScrollView>
-        {detail?.name && detail.status === 'PENDING_REVIEW' ? <View style={styles.modalFooter}><Pressable accessibilityRole="button" accessibilityState={{ disabled: busy }} disabled={busy} onPress={() => confirmReview('REJECTED')} style={styles.rejectButton}><Text style={styles.rejectText}>Reject</Text></Pressable><Pressable accessibilityRole="button" accessibilityState={{ disabled: busy, busy }} disabled={busy} onPress={() => confirmReview('APPROVED')} style={styles.approveButton}>{busy ? <ActivityIndicator color="#fff"/> : <Text style={styles.approveText}>Approve venue</Text>}</Pressable></View> : null}
+        {detail?.name && detail.status === 'PENDING_REVIEW' ? <View style={styles.modalFooter}>{pendingDecision ? <><Text style={styles.confirmText}>{pendingDecision === 'APPROVED' ? 'Approve this venue and show it to players?' : 'Reject this venue submission?'}</Text><View style={styles.confirmActions}><Pressable accessibilityRole="button" disabled={busy} onPress={() => setPendingDecision(null)} style={styles.rejectButton}><Text style={styles.rejectText}>Cancel</Text></Pressable><Pressable accessibilityRole="button" accessibilityState={{ disabled: busy, busy }} disabled={busy} onPress={() => review(pendingDecision)} style={[styles.approveButton, pendingDecision === 'REJECTED' && styles.confirmRejectButton]}>{busy ? <ActivityIndicator color="#fff"/> : <Text style={styles.approveText}>{pendingDecision === 'APPROVED' ? 'Confirm approval' : 'Confirm rejection'}</Text>}</Pressable></View></> : <View style={styles.confirmActions}><Pressable accessibilityRole="button" accessibilityState={{ disabled: busy }} disabled={busy} onPress={() => confirmReview('REJECTED')} style={styles.rejectButton}><Text style={styles.rejectText}>Reject</Text></Pressable><Pressable accessibilityRole="button" accessibilityState={{ disabled: busy, busy }} disabled={busy} onPress={() => confirmReview('APPROVED')} style={styles.approveButton}><Text style={styles.approveText}>Approve venue</Text></Pressable></View>}</View> : null}
       </SafeAreaView>
     </Modal>
   </SafeAreaView>;
@@ -134,5 +132,5 @@ const styles = StyleSheet.create({
   state: { backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.lg, padding: SPACING.xxl, minHeight: 155, alignItems: 'center', justifyContent: 'center', gap: SPACING.sm }, stateTitle: { color: COLORS.textPrimary, fontSize: FONT_SIZE.lg, fontWeight: FONT_WEIGHT.bold }, stateText: { color: COLORS.textSecondary, fontSize: FONT_SIZE.sm, textAlign: 'center' }, retry: { minHeight: 44, minWidth: 90, borderRadius: RADIUS.md, backgroundColor: COLORS.primaryDark, alignItems: 'center', justifyContent: 'center', paddingHorizontal: SPACING.lg, marginTop: SPACING.sm }, retryText: { color: '#fff', fontWeight: FONT_WEIGHT.semibold },
   venueCard: { backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.lg, padding: SPACING.lg, marginBottom: SPACING.sm }, venueTop: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md }, venueIcon: { width: 44, height: 44, borderRadius: 14, backgroundColor: '#EAF4ED', alignItems: 'center', justifyContent: 'center' }, venueName: { color: COLORS.textPrimary, fontSize: FONT_SIZE.md, fontWeight: FONT_WEIGHT.bold }, venueLocation: { color: COLORS.textSecondary, fontSize: FONT_SIZE.sm, marginTop: 3 }, venueBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: SPACING.sm, marginTop: SPACING.md, paddingTop: SPACING.md, borderTopWidth: 1, borderTopColor: COLORS.divider }, ownerText: { color: COLORS.textMuted, fontSize: FONT_SIZE.xs, flex: 1 }, statusBadge: { paddingHorizontal: SPACING.sm, paddingVertical: 5, borderRadius: RADIUS.pill }, statusPending: { backgroundColor: '#FFF2D7' }, statusApproved: { backgroundColor: '#E7F5EA' }, statusRejected: { backgroundColor: '#FDEBEC' }, statusText: { color: COLORS.textPrimary, fontSize: FONT_SIZE.xs, fontWeight: FONT_WEIGHT.semibold },
   metricsHeading: { marginTop: SPACING.xxl, marginBottom: SPACING.md }, metricsGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: SPACING.sm }, metric: { width: '48%', backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.lg, padding: SPACING.md, minHeight: 112, justifyContent: 'space-between' }, metricValue: { color: COLORS.textPrimary, fontSize: FONT_SIZE.xl, fontWeight: FONT_WEIGHT.bold, marginTop: SPACING.sm }, metricLabel: { color: COLORS.textMuted, fontSize: FONT_SIZE.xs }, metricError: { padding: SPACING.lg, backgroundColor: COLORS.card, borderRadius: RADIUS.lg },
-  modalHeader: { backgroundColor: COLORS.card, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.lg, paddingVertical: SPACING.md, borderBottomWidth: 1, borderBottomColor: COLORS.border }, modalTitle: { color: COLORS.textPrimary, fontSize: FONT_SIZE.xxl, fontWeight: FONT_WEIGHT.bold, marginTop: 3 }, closeButton: { minHeight: 48, minWidth: 48, alignItems: 'center', justifyContent: 'center' }, modalContent: { padding: SPACING.lg, paddingBottom: SPACING.xxl, gap: SPACING.md }, cover: { width: '100%', height: 190, borderRadius: RADIUS.lg, backgroundColor: COLORS.border }, detailName: { fontSize: FONT_SIZE.xxl, fontWeight: FONT_WEIGHT.bold, color: COLORS.textPrimary }, detailAddress: { fontSize: FONT_SIZE.sm, color: COLORS.textSecondary }, detailCard: { backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.lg, padding: SPACING.lg }, detailLine: { flexDirection: 'row', justifyContent: 'space-between', gap: SPACING.md, paddingVertical: SPACING.sm, borderBottomWidth: 1, borderBottomColor: COLORS.divider }, detailLabel: { width: '38%', color: COLORS.textMuted, fontSize: FONT_SIZE.sm }, detailValue: { flex: 1, color: COLORS.textPrimary, fontSize: FONT_SIZE.sm, fontWeight: FONT_WEIGHT.semibold, textAlign: 'right' }, descriptionTitle: { color: COLORS.textPrimary, fontSize: FONT_SIZE.md, fontWeight: FONT_WEIGHT.bold, marginBottom: SPACING.sm }, description: { color: COLORS.textSecondary, fontSize: FONT_SIZE.sm, lineHeight: 21 }, errorText: { color: COLORS.danger, fontSize: FONT_SIZE.sm, textAlign: 'center' }, modalFooter: { flexDirection: 'row', gap: SPACING.sm, padding: SPACING.lg, backgroundColor: COLORS.card, borderTopWidth: 1, borderTopColor: COLORS.border }, rejectButton: { minHeight: 50, flex: 1, borderRadius: RADIUS.lg, borderWidth: 1, borderColor: COLORS.danger, alignItems: 'center', justifyContent: 'center' }, rejectText: { color: COLORS.danger, fontSize: FONT_SIZE.md, fontWeight: FONT_WEIGHT.semibold }, approveButton: { minHeight: 50, flex: 2, borderRadius: RADIUS.lg, backgroundColor: COLORS.primaryDark, alignItems: 'center', justifyContent: 'center' }, approveText: { color: '#fff', fontSize: FONT_SIZE.md, fontWeight: FONT_WEIGHT.bold },
+  modalHeader: { backgroundColor: COLORS.card, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.lg, paddingVertical: SPACING.md, borderBottomWidth: 1, borderBottomColor: COLORS.border }, modalTitle: { color: COLORS.textPrimary, fontSize: FONT_SIZE.xxl, fontWeight: FONT_WEIGHT.bold, marginTop: 3 }, closeButton: { minHeight: 48, minWidth: 48, alignItems: 'center', justifyContent: 'center' }, modalContent: { padding: SPACING.lg, paddingBottom: SPACING.xxl, gap: SPACING.md }, cover: { width: '100%', height: 190, borderRadius: RADIUS.lg, backgroundColor: COLORS.border }, detailName: { fontSize: FONT_SIZE.xxl, fontWeight: FONT_WEIGHT.bold, color: COLORS.textPrimary }, detailAddress: { fontSize: FONT_SIZE.sm, color: COLORS.textSecondary }, detailCard: { backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.lg, padding: SPACING.lg }, detailLine: { flexDirection: 'row', justifyContent: 'space-between', gap: SPACING.md, paddingVertical: SPACING.sm, borderBottomWidth: 1, borderBottomColor: COLORS.divider }, detailLabel: { width: '38%', color: COLORS.textMuted, fontSize: FONT_SIZE.sm }, detailValue: { flex: 1, color: COLORS.textPrimary, fontSize: FONT_SIZE.sm, fontWeight: FONT_WEIGHT.semibold, textAlign: 'right' }, descriptionTitle: { color: COLORS.textPrimary, fontSize: FONT_SIZE.md, fontWeight: FONT_WEIGHT.bold, marginBottom: SPACING.sm }, description: { color: COLORS.textSecondary, fontSize: FONT_SIZE.sm, lineHeight: 21 }, errorText: { color: COLORS.danger, fontSize: FONT_SIZE.sm, textAlign: 'center' }, modalFooter: { gap: SPACING.sm, padding: SPACING.lg, backgroundColor: COLORS.card, borderTopWidth: 1, borderTopColor: COLORS.border }, confirmText: { color: COLORS.textPrimary, fontSize: FONT_SIZE.md, fontWeight: FONT_WEIGHT.semibold }, confirmActions: { flexDirection: 'row', gap: SPACING.sm }, rejectButton: { minHeight: 50, flex: 1, borderRadius: RADIUS.lg, borderWidth: 1, borderColor: COLORS.danger, alignItems: 'center', justifyContent: 'center' }, rejectText: { color: COLORS.danger, fontSize: FONT_SIZE.md, fontWeight: FONT_WEIGHT.semibold }, approveButton: { minHeight: 50, flex: 2, borderRadius: RADIUS.lg, backgroundColor: COLORS.primaryDark, alignItems: 'center', justifyContent: 'center' }, confirmRejectButton: { backgroundColor: COLORS.danger }, approveText: { color: '#fff', fontSize: FONT_SIZE.md, fontWeight: FONT_WEIGHT.bold },
 });

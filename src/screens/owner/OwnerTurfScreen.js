@@ -1,5 +1,5 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, AppState, Image, KeyboardAvoidingView, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -32,6 +32,7 @@ export default function OwnerTurfScreen() {
   const [slotError, setSlotError] = useState('');
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(null);
+  const slotRequest = useRef(0);
 
   const selected = useMemo(() => venues.find(venue => venue.id === selectedId) || null, [venues, selectedId]);
   const loadVenues = useCallback(async () => {
@@ -44,16 +45,23 @@ export default function OwnerTurfScreen() {
   useFocusEffect(useCallback(() => { const next = upcomingDates(7); setDates(next); setDate(current => next.includes(current) ? current : next[0]); }, []));
 
   const loadSlots = useCallback(async () => {
+    const request = ++slotRequest.current;
     if (!selectedId) { setSlots([]); setBlocks([]); return; }
     setSlotsLoading(true); setSlotError('');
     const [availability, intervals] = await Promise.allSettled([ownerApi.getAvailability(selectedId, date), ownerApi.getBlockedIntervals(selectedId)]);
+    if (request !== slotRequest.current) return;
     if (availability.status === 'fulfilled') setSlots(availability.value.slots);
     else { setSlots([]); setSlotError(availability.reason?.message || 'Could not load slot availability.'); }
     if (intervals.status === 'fulfilled') setBlocks(intervals.value.items);
     else { setBlocks([]); setSlotError(intervals.reason?.message || 'Could not load inventory blocks.'); }
     setSlotsLoading(false);
   }, [selectedId, date]);
-  useFocusEffect(useCallback(() => { loadSlots(); }, [loadSlots]));
+  useFocusEffect(useCallback(() => {
+    if (AppState.currentState === 'active') loadSlots();
+    const timer = setInterval(() => { if (AppState.currentState === 'active') loadSlots(); }, 30000);
+    const subscription = AppState.addEventListener('change', state => { if (state === 'active') loadSlots(); });
+    return () => { clearInterval(timer); subscription.remove(); slotRequest.current += 1; };
+  }, [loadSlots]));
 
   function openEdit() {
     if (!selected) return;
