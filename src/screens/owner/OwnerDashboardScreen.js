@@ -75,9 +75,8 @@ export default function OwnerDashboardScreen({ navigation }) {
       { label: 'Your venues', icon: 'football-outline', tint: '#F1EAF8', iconColor: '#7C3AED' },
     ];
 
-    const upcoming = statsData?.upcomingBookings || [];
-    const upcomingRevenue = upcoming.reduce((sum, b) => sum + (b.totalAmount || 0), 0);
-    const upcomingCount = upcoming.length;
+    const upcomingRevenue = statsData?.stats?.upcomingValue || 0;
+    const upcomingCount = statsData?.stats?.upcomingBookings || 0;
 
     return [
       {
@@ -150,7 +149,7 @@ export default function OwnerDashboardScreen({ navigation }) {
         date: formatDhakaDate(start),
         time: `${formatDhakaTime(start)} – ${formatDhakaTime(end)}`,
         price: b.totalAmount || 0,
-        paymentMethod: b.paymentMethod || 'Cash',
+        paymentMethod: `Demo · ${b.paymentMethod || 'Payment'}`,
         status: 'upcoming',
       };
     });

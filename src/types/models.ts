@@ -53,7 +53,7 @@ export interface DiscoveryFilters {
   hasParking?: boolean; availableOnly?: boolean; cursor?: string; limit?: number;
 }
 export interface OwnerStats {
-  stats: {totalVenues: number; totalBookings: number; totalRevenue: number; occupancyRate: number | null};
+  stats: {totalVenues: number; totalBookings: number; totalRevenue: number; upcomingBookings: number; upcomingValue: number; occupancyRate: number | null};
   ownedTurfs: Turf[]; upcomingBookings: Booking[]; aiPricingInsights: AIInsight[];
   dataBasis: string; paymentMode: 'DEMO';
 }

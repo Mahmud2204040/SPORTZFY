@@ -44,13 +44,20 @@ export async function GET(_request: NextRequest) {
     const totalRevenue = allBookings.reduce((sum, b) => sum + b.totalAmount, 0);
     const totalBookingsCount = allBookings.length;
 
-    // Upcoming bookings
+    const upcomingWhere = {
+      turfId: { in: ownedTurfs.map((t) => t.id) },
+      status: "CONFIRMED" as const,
+      startTime: { gte: new Date() },
+    };
+    const upcomingSummary = await prisma.booking.aggregate({
+      where: upcomingWhere,
+      _count: { _all: true },
+      _sum: { totalAmount: true },
+    });
+
+    // Keep the preview bounded; the dashboard totals come from all matching bookings.
     const upcomingBookings = await prisma.booking.findMany({
-      where: {
-        turfId: { in: ownedTurfs.map((t) => t.id) },
-        status: "CONFIRMED",
-        startTime: { gte: new Date() },
-      },
+      where: upcomingWhere,
       include: {
         turf: { select: { name: true, area: true } },
         user: { select: { name: true, phone: true } },
@@ -128,6 +135,8 @@ export async function GET(_request: NextRequest) {
           totalVenues: ownedTurfs.length,
           totalBookings: totalBookingsCount,
           totalRevenue,
+          upcomingBookings: upcomingSummary._count._all,
+          upcomingValue: upcomingSummary._sum.totalAmount ?? 0,
           occupancyRate: null,
         },
         ownedTurfs: ownedTurfs.map((t) => ({
