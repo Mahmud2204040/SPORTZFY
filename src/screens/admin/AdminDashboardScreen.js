@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { adminApi } from '../../api/admin';
@@ -47,7 +48,7 @@ export default function AdminDashboardScreen() {
     else { setStats(null); setStatsError(statsResult.reason?.message || 'Could not load platform metrics.'); }
     setLoading(false); setRefreshing(false);
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const filtered = useMemo(() => filter === 'All' ? turfs : turfs.filter(t => t.status === filter), [turfs, filter]);
   const pendingCount = turfs.filter(t => t.status === 'PENDING_REVIEW').length;
@@ -111,7 +112,7 @@ export default function AdminDashboardScreen() {
             {detail.coverImage ? <Image source={{ uri: detail.coverImage }} style={styles.cover} /> : null}
             <Text style={styles.detailName}>{detail.name}</Text>
             <Text style={styles.detailAddress}>{[detail.address, detail.area, detail.city].filter(Boolean).join(' · ')}</Text>
-            <View style={styles.detailCard}><DetailLine label="Status" value={statusLabel(detail.status)} /><DetailLine label="Submitted" value={formatDate(detail.createdAt)} /><DetailLine label="Owner" value={detail.owner?.name} /><DetailLine label="Email" value={detail.owner?.email} /><DetailLine label="Phone" value={detail.owner?.phone} /><DetailLine label="Pitch formats" value={detail.pitchFormats} /><DetailLine label="Base price" value={`${money(detail.basePricePerHour)} per hour`} /><DetailLine label="Bookings" value={String(detail.bookings?.length ?? 0)} /></View>
+            <View style={styles.detailCard}><DetailLine label="Status" value={statusLabel(detail.status)} /><DetailLine label="Last updated" value={formatDate(detail.updatedAt)} /><DetailLine label="Owner" value={detail.owner?.name} /><DetailLine label="Email" value={detail.owner?.email} /><DetailLine label="Phone" value={detail.owner?.phone} /><DetailLine label="Pitch formats" value={detail.pitchFormats} /><DetailLine label="Base price" value={`${money(detail.basePricePerHour)} per hour`} /><DetailLine label="Bookings" value={String(detail.bookings?.length ?? 0)} /></View>
             {detail.description ? <View style={styles.detailCard}><Text style={styles.descriptionTitle}>Description</Text><Text style={styles.description}>{detail.description}</Text></View> : null}
             <View style={styles.detailCard}><Text style={styles.descriptionTitle}>Facilities</Text><Text style={styles.description}>{[['Floodlights', detail.hasFloodlights], ['Parking', detail.hasParking], ['Washroom', detail.hasWashroom], ['Changing room', detail.hasChangingRoom], ['Water', detail.hasWater]].filter(([, present]) => present).map(([name]) => name).join(' · ') || 'None listed'}</Text></View>
             {detailError ? <Text accessibilityRole="alert" style={styles.errorText}>{detailError}</Text> : null}

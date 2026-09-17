@@ -56,7 +56,7 @@ export async function PATCH(
     // Verify ownership
     const existingTurf = await prisma.turf.findUnique({
       where: { id },
-      select: { id: true, ownerId: true },
+      select: { id: true, ownerId: true, status: true },
     });
 
     if (!existingTurf) {
@@ -91,10 +91,16 @@ export async function PATCH(
         ...(body.hasWashroom !== undefined && { hasWashroom: Boolean(body.hasWashroom) }),
         ...(body.hasChangingRoom !== undefined && { hasChangingRoom: Boolean(body.hasChangingRoom) }),
         ...(body.hasWater !== undefined && { hasWater: Boolean(body.hasWater) }),
+        ...(currentUser.role === "OWNER" && { status: "PENDING_REVIEW" }),
       },
     });
 
-    return NextResponse.json({ data: updated, message: "Venue updated successfully." });
+    return NextResponse.json({
+      data: updated,
+      message: currentUser.role === "OWNER"
+        ? "Venue changes submitted for administrator review. The listing is hidden from players until approved."
+        : "Venue updated successfully.",
+    });
   } catch (error) {
     console.error("Error updating turf:", error);
     return NextResponse.json(
