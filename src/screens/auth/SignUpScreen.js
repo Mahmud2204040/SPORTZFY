@@ -1,6 +1,4 @@
-// SignUpScreen — multi-field register form. The role picker decides
-// which app shell the new user lands in (Customer / Turf Owner / Admin).
-// All values are mocked — see AuthContext for the fake auth flow.
+// SignUpScreen — multi-field register form with real API integration.
 
 import React, { useState } from 'react';
 import {
@@ -12,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,7 +20,6 @@ import SegmentedControl from '../../components/SegmentedControl';
 import { useAuth } from '../../context/AuthContext';
 import { COLORS, SPACING, RADIUS, FONT_SIZE, FONT_WEIGHT } from '../../constants/theme';
 
-// Only two roles ship for now. Admin role UI is deferred.
 const ROLE_OPTIONS = [
   { id: 'customer', label: 'Customer' },
   { id: 'owner', label: 'Turf Owner' },
@@ -38,7 +36,7 @@ export default function SignUpScreen({ navigation }) {
   const [role, setRole] = useState('customer');
   const [error, setError] = useState('');
 
-  function handleRegister() {
+  async function handleRegister() {
     setError('');
     if (!name.trim()) {
       setError('Please tell us your full name.');
@@ -57,15 +55,20 @@ export default function SignUpScreen({ navigation }) {
       return;
     }
 
-    register({
-      name: name.trim(),
-      phone: phone.trim(),
-      email: email.trim(),
-      password,
-      role,
-    }).catch((err) => {
-      setError(err?.message || 'Sign up failed. Please try again.');
-    });
+    try {
+      await register({
+        name: name.trim(),
+        phone: phone.trim(),
+        email: email.trim(),
+        password,
+        role,
+      });
+    } catch (err) {
+      console.log('Register error:', err);
+      const msg = err?.message || 'Registration failed. Please try again.';
+      setError(msg);
+      Alert.alert('Sign Up Failed', msg);
+    }
   }
 
   return (

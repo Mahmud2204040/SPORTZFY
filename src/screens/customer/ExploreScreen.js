@@ -1,12 +1,13 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
-// ScrollView used below for the results list.
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -14,14 +15,13 @@ import Header from '../../components/Header';
 import SearchBar from '../../components/SearchBar';
 import TurfCard from '../../components/TurfCard';
 import FilterModal from '../../components/FilterModal';
+import { turfsApi } from '../../api/turfs';
 
 import {
-  TURFS,
   getAllLocations,
   getAllSports,
   PRICE_RANGE,
 } from '../../data/mockData';
-import { useBooking } from '../../context/BookingContext';
 import {
   COLORS,
   SPACING,
@@ -40,60 +40,83 @@ const DEFAULT_FILTERS = {
   availability: 'Any',
 };
 
-export default function ExploreScreen({ navigation }) {
-  const { userLocation } = useBooking();
+export default function ExploreScreen({ navigation, route }) {
+  const initialQuery = route?.params?.query || '';
 
-  // Search query
-  const [query, setQuery] = useState('');
-
-  // Filters (applied). The draft copy lives inside FilterModal.
+  const [query, setQuery] = useState(initialQuery);
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
-
-  // Modal visibility
   const [showFilters, setShowFilters] = useState(false);
 
-  // Helper: parse a rating threshold like "4.0+" into a number (4.0).
+  const [apiTurfs, setApiTurfs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState('');
+
+  const fetchTurfs = useCallback(async () => {
+    setError('');
+    try {
+      const params = {};
+
+      if (query.trim()) params.q = query.trim();
+      if (filters.location !== 'All') params.city = filters.location;
+      if (filters.sport !== 'All' && /^(5v5|6v6|7v7|Cricket Box)$/i.test(filters.sport)) params.format = filters.sport;
+
+      const res = await turfsApi.getTurfs(params);
+
+      if (res && Array.isArray(res.items)) {
+        setApiTurfs(res.items);
+      }
+    } catch (err) {
+      setError(err?.message || 'Could not load turfs.');
+      setApiTurfs([]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [query, filters]);
+
+  useEffect(() => {
+    const timer = setTimeout(fetchTurfs, 300);
+    return () => clearTimeout(timer);
+  }, [fetchTurfs]);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchTurfs();
+  };
+
   function parseRating(value) {
     if (!value || value === 'Any') return 0;
     return parseFloat(value) || 0;
   }
 
-  // Filtering logic — runs whenever query or filters change.
+  // Apply client-side filters on top of API results
   const results = useMemo(() => {
-    const q = query.trim().toLowerCase();
     const minRating = parseRating(filters.minRating);
+    const source = apiTurfs;
 
-    return TURFS.filter((t) => {
-      // Search match: name OR location
-      if (q && !t.name.toLowerCase().includes(q) && !t.location.toLowerCase().includes(q)) {
+    return source.filter((t) => {
+      // Price filter
+      const price = t.basePricePerHour ?? t.pricePerHour ?? 0;
+      if (price < filters.minPrice || price > filters.maxPrice) {
         return false;
       }
-      // Location
-      if (filters.location !== 'All' && t.location !== filters.location) {
-        return false;
-      }
-      // Sport
-      if (filters.sport !== 'All' && t.sport !== filters.sport) {
-        return false;
-      }
-      // Price
-      if (t.pricePerHour < filters.minPrice || t.pricePerHour > filters.maxPrice) {
-        return false;
-      }
-      // Rating
+
+      // Rating filter
       if (t.rating < minRating) {
         return false;
       }
-      // Availability — mock check: turf has at least one 'available' slot.
-      if (filters.availability === 'Available today') {
+
+      // Availability filter (mock for fallback data)
+      if (filters.availability === 'Available today' && t.availableSlots) {
         const hasOpen = t.availableSlots.some((s) => s.status === 'available');
         if (!hasOpen) return false;
       }
+
       return true;
     });
-  }, [query, filters]);
+  }, [apiTurfs, filters]);
 
-  // Count of active filters (used for the badge on the Filters button).
   const activeFilterCount = useMemo(() => {
     let count = 0;
     if (filters.location !== 'All') count++;
@@ -107,7 +130,7 @@ export default function ExploreScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <Header location={userLocation} />
+      <Header />
 
       {/* Search + filter row */}
       <View style={styles.searchRow}>
@@ -115,6 +138,7 @@ export default function ExploreScreen({ navigation }) {
           <SearchBar
             value={query}
             onChangeText={setQuery}
+            onSubmitEditing={fetchTurfs}
             placeholder="Search turfs..."
           />
         </View>
@@ -132,10 +156,10 @@ export default function ExploreScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* Result count + active filters summary */}
+      {/* Result count */}
       <View style={styles.summaryRow}>
         <Text style={styles.summary}>
-          {results.length} {results.length === 1 ? 'turf' : 'turfs'} found
+          {loading ? 'Searching...' : `${results.length} ${results.length === 1 ? 'turf' : 'turfs'} found`}
         </Text>
       </View>
 
@@ -144,8 +168,28 @@ export default function ExploreScreen({ navigation }) {
         style={styles.scroll}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[COLORS.primary]}
+            tintColor={COLORS.primary}
+          />
+        }
       >
-        {results.length === 0 ? (
+        {loading ? (
+          <View style={styles.loadingBox}>
+            <ActivityIndicator size="large" color={COLORS.primary} />
+            <Text style={styles.loadingText}>Finding turfs...</Text>
+          </View>
+        ) : error ? (
+          <View style={styles.empty}>
+            <Ionicons name="cloud-offline-outline" size={44} color={COLORS.textMuted} />
+            <Text style={styles.emptyTitle}>Could not load turfs</Text>
+            <Text style={styles.emptySubtitle}>{error}</Text>
+            <TouchableOpacity onPress={onRefresh} style={styles.retryBtn}><Text style={styles.retryText}>Retry</Text></TouchableOpacity>
+          </View>
+        ) : results.length === 0 ? (
           <View style={styles.empty}>
             <Ionicons name="search-outline" size={48} color={COLORS.textMuted} />
             <Text style={styles.emptyTitle}>No turfs found</Text>
@@ -246,6 +290,16 @@ const styles = StyleSheet.create({
   list: {
     paddingHorizontal: SPACING.lg,
   },
+  loadingBox: {
+    padding: SPACING.xxxl,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingText: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.textMuted,
+    marginTop: SPACING.sm,
+  },
   empty: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -264,4 +318,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: SPACING.xl,
   },
+  retryBtn: { marginTop: SPACING.md, backgroundColor: COLORS.primary, paddingHorizontal: SPACING.lg, paddingVertical: SPACING.sm, borderRadius: RADIUS.md },
+  retryText: { color: COLORS.textOnPrimary, fontWeight: FONT_WEIGHT.semibold },
 });

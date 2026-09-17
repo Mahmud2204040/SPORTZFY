@@ -15,7 +15,7 @@ export const COLORS = {
   // Text
   textPrimary: '#1A1A1A',
   textSecondary: '#4A4A4A',
-  textMuted: '#9A9A9A',
+  textMuted: '#637067',
   textOnPrimary: '#FFFFFF',
 
   // Lines
@@ -32,7 +32,7 @@ export const COLORS = {
   slotAvailableBorder: '#1B8A3A',
   slotAvailableText: '#1B8A3A',
   slotBookedBg: '#F0F0F0',
-  slotBookedText: '#9A9A9A',
+  slotBookedText: '#637067',
   slotSelectedBg: '#1B8A3A',
   slotSelectedText: '#FFFFFF',
 };

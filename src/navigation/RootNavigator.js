@@ -12,24 +12,29 @@
 // signs up / logs in again with the other role.
 
 import React from 'react';
+import { View, ActivityIndicator } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 
 import { useAuth } from '../context/AuthContext';
 import AuthStack from './AuthStack';
 import MainStack from './MainStack';
 import OwnerStack from './OwnerStack';
+import AdminStack from './AdminStack';
 
 export default function RootNavigator() {
-  const { isAuthed, role } = useAuth();
+  const { isAuthed, role, initialLoading } = useAuth();
+
+  if (initialLoading) return <SafeAreaView style={{flex: 1, alignItems: 'center', justifyContent: 'center'}}><ActivityIndicator color="#15803D" size="large" /></SafeAreaView>;
 
   // Forces a fresh mount when auth state changes.
-  const navKey = isAuthed ? `app-${role}` : 'auth';
+  const navKey = isAuthed ? `app-${role}` : 'guest';
 
   return (
     <NavigationContainer key={navKey}>
-      {!isAuthed ? (
-        <AuthStack />
-      ) : role === 'owner' ? (
+      {isAuthed && role === 'admin' ? (
+        <AdminStack />
+      ) : isAuthed && role === 'owner' ? (
         <OwnerStack />
       ) : (
         <MainStack />

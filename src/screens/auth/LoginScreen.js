@@ -1,7 +1,5 @@
 // LoginScreen — first screen a guest sees.
-// Asks for email (or phone) + password, plus a role picker so the user can
-// decide which app they want to enter (Customer / Turf Owner / Admin).
-// All values are mocked — see AuthContext for the fake auth flow.
+// Asks for email (or phone) + password, plus role selection and demo credentials.
 
 import React, { useState } from 'react';
 import {
@@ -13,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,25 +21,32 @@ import SegmentedControl from '../../components/SegmentedControl';
 import { useAuth } from '../../context/AuthContext';
 import { COLORS, SPACING, RADIUS, FONT_SIZE, FONT_WEIGHT } from '../../constants/theme';
 
-// Only two roles ship for now. Admin role UI is deferred.
 const ROLE_OPTIONS = [
   { id: 'customer', label: 'Customer' },
   { id: 'owner', label: 'Turf Owner' },
+  { id: 'admin', label: 'Admin' },
 ];
 
 export default function LoginScreen({ navigation }) {
   const { login, loading } = useAuth();
 
-  const [identifier, setIdentifier] = useState(''); // email or phone
+  const [identifier, setIdentifier] = useState(''); // email
   const [password, setPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
   const [role, setRole] = useState('customer');
   const [error, setError] = useState('');
 
-  function handleLogin() {
+  function fillDemo(email, pass, demoRole) {
+    setIdentifier(email);
+    setPassword(pass);
+    setRole(demoRole);
+    setError('');
+  }
+
+  async function handleLogin() {
     setError('');
     if (!identifier.trim()) {
-      setError('Please enter your email or phone number.');
+      setError('Please enter your email address.');
       return;
     }
     if (!password) {
@@ -48,14 +54,18 @@ export default function LoginScreen({ navigation }) {
       return;
     }
 
-    login({
-      email: identifier.includes('@') ? identifier.trim() : undefined,
-      phone: !identifier.includes('@') ? identifier.trim() : undefined,
-      password,
-      role,
-    }).catch((err) => {
-      setError(err?.message || 'Login failed. Please try again.');
-    });
+    try {
+      await login({
+        email: identifier.trim(),
+        password,
+        role,
+      });
+    } catch (err) {
+      console.log('Login error:', err);
+      const msg = err?.message || 'Login failed. Please verify credentials.';
+      setError(msg);
+      Alert.alert('Sign In Failed', msg);
+    }
   }
 
   return (
@@ -75,22 +85,22 @@ export default function LoginScreen({ navigation }) {
               <Ionicons name="football" size={36} color={COLORS.textOnPrimary} />
             </View>
             <Text style={styles.brandTitle}>Sportzfy</Text>
-            <Text style={styles.brandSub}>Sign in to book & manage turfs</Text>
+            <Text style={styles.brandSub}>Live Turf Booking & Squad Recruitment</Text>
           </View>
 
           {/* Card */}
           <View style={styles.card}>
-            <Text style={styles.label}>Email or phone</Text>
+            <Text style={styles.label}>Email address</Text>
             <View style={styles.inputWrap}>
               <Ionicons
-                name="person-outline"
+                name="mail-outline"
                 size={18}
                 color={COLORS.textMuted}
                 style={styles.inputIcon}
               />
               <TextInput
                 style={styles.input}
-                placeholder="you@example.com"
+                placeholder="player@sportzfy.com"
                 placeholderTextColor={COLORS.textMuted}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -132,9 +142,34 @@ export default function LoginScreen({ navigation }) {
             <Text style={styles.label}>Sign in as</Text>
             <SegmentedControl options={ROLE_OPTIONS} value={role} onChange={setRole} />
 
+            {/* Quick Demo Fill Buttons */}
+            <View style={styles.demoSection}>
+              <Text style={styles.demoTitle}>Quick Fill Demo Credentials:</Text>
+              <View style={styles.demoRow}>
+                <TouchableOpacity
+                  style={styles.demoChip}
+                  onPress={() => fillDemo('player@sportzfy.com', 'sportzfy123', 'customer')}
+                >
+                  <Text style={styles.demoChipText}>⚽ Player</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.demoChip}
+                  onPress={() => fillDemo('owner@sportzfy.com', 'sportzfy123', 'owner')}
+                >
+                  <Text style={styles.demoChipText}>🏟️ Owner</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.demoChip}
+                  onPress={() => fillDemo('admin@sportzfy.com', 'sportzfy123', 'admin')}
+                >
+                  <Text style={styles.demoChipText}>🛡️ Admin</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
             {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-            <View style={{ height: SPACING.lg }} />
+            <View style={{ height: SPACING.md }} />
 
             <PrimaryButton
               title={loading ? 'Signing in...' : 'Sign In'}
@@ -169,20 +204,20 @@ const styles = StyleSheet.create({
   },
   scroll: {
     padding: SPACING.lg,
-    paddingTop: SPACING.xxl,
+    paddingTop: SPACING.lg,
   },
   brand: {
     alignItems: 'center',
-    marginBottom: SPACING.xl,
+    marginBottom: SPACING.lg,
   },
   logoCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: COLORS.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: SPACING.md,
+    marginBottom: SPACING.sm,
   },
   brandTitle: {
     fontSize: FONT_SIZE.xxxl,
@@ -190,9 +225,9 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
   },
   brandSub: {
-    fontSize: FONT_SIZE.sm,
+    fontSize: FONT_SIZE.xs,
     color: COLORS.textMuted,
-    marginTop: SPACING.xs,
+    marginTop: 2,
   },
   card: {
     backgroundColor: COLORS.card,
@@ -228,6 +263,38 @@ const styles = StyleSheet.create({
   },
   eyeBtn: {
     paddingLeft: SPACING.sm,
+  },
+  demoSection: {
+    marginTop: SPACING.md,
+    padding: SPACING.sm,
+    backgroundColor: '#F0FDF4',
+    borderRadius: RADIUS.sm,
+    borderWidth: 1,
+    borderColor: '#DCFCE7',
+  },
+  demoTitle: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: FONT_WEIGHT.semibold,
+    color: '#166534',
+    marginBottom: SPACING.xs,
+  },
+  demoRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+  },
+  demoChip: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+    borderRadius: RADIUS.sm,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 4,
+  },
+  demoChipText: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: FONT_WEIGHT.medium,
+    color: '#15803D',
   },
   signupRow: {
     marginTop: SPACING.md,

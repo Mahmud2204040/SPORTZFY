@@ -1,6 +1,9 @@
 // OwnerSlotTile — one slot in the owner's slot grid.
-// Shows start–end time, a status pill, and a tap-to-toggle affordance.
-// Booked slots are visually locked (grey + "Booked" label) and not tappable.
+// Shows a start–end time label and a toggleable status pill.
+//
+// In the owner UI we treat:
+// - status === 'available' → slot is open for online bookings
+// - status === 'booked'    → slot is BLOCKED (locked for walk-in / maintenance)
 
 import React from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
@@ -9,43 +12,49 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, FONT_SIZE, FONT_WEIGHT } from '../constants/theme';
 
 function formatHour(hhmm) {
-  const [h, m] = hhmm.split(':');
-  const hour = parseInt(h, 10);
-  const period = hour >= 12 ? 'PM' : 'AM';
-  const display = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
+  const [hRaw, mRaw] = String(hhmm).split(':');
+  const h = parseInt(hRaw, 10);
+  const m = mRaw || '00';
+  const period = h >= 12 ? 'PM' : 'AM';
+  const display = h > 12 ? h - 12 : h === 0 ? 12 : h;
   return m === '00' ? `${display} ${period}` : `${display}:${m} ${period}`;
 }
 
 export default function OwnerSlotTile({ slot, onPress }) {
   const { startTime, endTime, status } = slot;
-  const isBooked = status === 'booked';
+  const isBlocked = status === 'booked';
 
   return (
     <Pressable
-      onPress={isBooked ? null : onPress}
+      onPress={onPress}
       style={({ pressed }) => [
         styles.tile,
-        isBooked && styles.tileBooked,
-        pressed && !isBooked && styles.tilePressed,
+        isBlocked && styles.tileBooked,
+        pressed && !isBlocked && styles.tilePressed,
       ]}
     >
       <View style={styles.timeWrap}>
-        <Text style={[styles.time, isBooked && styles.timeBooked]}>
+        <Text style={[styles.time, isBlocked && styles.timeBooked]}>
           {formatHour(startTime)}
         </Text>
-        <Text style={[styles.timeMuted, isBooked && styles.timeBooked]}>
+        <Text style={[styles.timeMuted, isBlocked && styles.timeBooked]}>
           to {formatHour(endTime)}
         </Text>
       </View>
 
-      <View style={[styles.pill, isBooked ? styles.pillBooked : styles.pillAvailable]}>
+      <View style={[styles.pill, isBlocked ? styles.pillBooked : styles.pillAvailable]}>
         <Ionicons
-          name={isBooked ? 'lock-closed' : 'checkmark-circle'}
+          name={isBlocked ? 'lock-closed' : 'checkmark-circle'}
           size={12}
-          color={isBooked ? COLORS.textMuted : COLORS.primary}
+          color={isBlocked ? COLORS.textMuted : COLORS.primary}
         />
-        <Text style={[styles.pillText, isBooked ? styles.pillTextBooked : styles.pillTextAvailable]}>
-          {isBooked ? 'Booked' : 'Available'}
+        <Text
+          style={[
+            styles.pillText,
+            isBlocked ? styles.pillTextBooked : styles.pillTextAvailable,
+          ]}
+        >
+          {isBlocked ? 'Blocked' : 'Available'}
         </Text>
       </View>
     </Pressable>

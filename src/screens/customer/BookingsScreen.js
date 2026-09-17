@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import SegmentedControl from '../../components/SegmentedControl';
 import BookingCard from '../../components/BookingCard';
 
 import { useBooking } from '../../context/BookingContext';
+import { useAuth } from '../../context/AuthContext';
 import { COLORS, SPACING, RADIUS, FONT_SIZE, FONT_WEIGHT } from '../../constants/theme';
 
 // Inner status tabs (Upcoming / Completed / Cancelled).
@@ -22,19 +23,13 @@ const STATUS_OPTIONS = [
   { id: 'cancelled', label: 'Cancelled' },
 ];
 
-// Top-level Bookings vs Profile toggle (same screen, two views).
-const VIEW_OPTIONS = [
-  { id: 'bookings', label: 'Bookings' },
-  { id: 'profile', label: 'Profile' },
-];
-
 export default function BookingsScreen() {
-  const { bookings, userLocation } = useBooking();
+  const { bookings, fetchBookings } = useBooking();
+  const { user } = useAuth();
 
-  // Top-level toggle inside the Bookings tab.
-  const [view, setView] = useState('bookings');
+  // Fetch real bookings from API on mount
+  useEffect(() => { if (user) fetchBookings && fetchBookings(); }, [fetchBookings, user]);
 
-  // Inner: which booking status tab is showing.
   const [statusTab, setStatusTab] = useState('upcoming');
 
   // Filter bookings by status tab.
@@ -45,22 +40,13 @@ export default function BookingsScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <Header location={userLocation} />
+      <Header />
 
-      {/* Top-level toggle: Bookings | Profile */}
-      <View style={styles.toggleRow}>
-        <SegmentedControl options={VIEW_OPTIONS} value={view} onChange={setView} />
-      </View>
-
-      {view === 'bookings' ? (
-        <BookingsView
-          statusTab={statusTab}
-          setStatusTab={setStatusTab}
-          bookings={filteredBookings}
-        />
-      ) : (
-        <ProfileQuickLink />
-      )}
+      {!user ? <View style={styles.empty}><Ionicons name="lock-closed-outline" size={36} color={COLORS.textMuted}/><Text style={styles.emptyTitle}>Sign in to view bookings</Text></View> : <BookingsView
+        statusTab={statusTab}
+        setStatusTab={setStatusTab}
+        bookings={filteredBookings}
+      />}
     </SafeAreaView>
   );
 }
@@ -84,7 +70,9 @@ function BookingsView({ statusTab, setStatusTab, bookings }) {
         {bookings.length === 0 ? (
           <EmptyState statusTab={statusTab} />
         ) : (
-          bookings.map((booking) => <BookingCard key={booking.id} booking={booking} />)
+          bookings.map((booking) => (
+            <BookingCard key={booking.id} booking={booking} />
+          ))
         )}
         <View style={{ height: SPACING.xxl }} />
       </ScrollView>
@@ -98,6 +86,7 @@ function EmptyState({ statusTab }) {
     completed: 'No completed bookings yet.',
     cancelled: 'No cancelled bookings.',
   };
+
   return (
     <View style={styles.empty}>
       <View style={styles.emptyIcon}>
@@ -109,37 +98,13 @@ function EmptyState({ statusTab }) {
   );
 }
 
-// --- Sub-view: Profile quick link -------------------------------------------
-// Profile lives in its own tab; from here we just nudge the user.
-function ProfileQuickLink() {
-  return (
-    <View style={styles.hintWrap}>
-      <View style={styles.emptyIcon}>
-        <Ionicons name="person-outline" size={36} color={COLORS.textMuted} />
-      </View>
-      <Text style={styles.hintTitle}>Your profile lives in the Profile tab</Text>
-      <Text style={styles.hintSub}>
-        Tap the "Profile" tab at the bottom to view your info, settings, and logout.
-      </Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
     backgroundColor: COLORS.primary,
   },
 
-  // Top-level toggle (Bookings | Profile)
-  toggleRow: {
-    backgroundColor: COLORS.background,
-    paddingHorizontal: SPACING.lg,
-    paddingTop: SPACING.lg,
-    marginTop: -SPACING.lg,
-  },
-
-  // Inner tabs (Upcoming / Completed / Cancelled)
+  // Inner tabs (Upcoming / Completed / Cancelled).
   innerToggleRow: {
     paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.md,
@@ -175,28 +140,6 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE.sm,
     color: COLORS.textMuted,
     marginTop: SPACING.xs,
-  },
-
-  // Profile quick-link panel
-  hintWrap: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: SPACING.xl,
-  },
-  hintTitle: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: FONT_WEIGHT.bold,
-    color: COLORS.textPrimary,
-    marginTop: SPACING.md,
     textAlign: 'center',
-  },
-  hintSub: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.textMuted,
-    textAlign: 'center',
-    marginTop: SPACING.xs,
-    paddingHorizontal: SPACING.lg,
   },
 });

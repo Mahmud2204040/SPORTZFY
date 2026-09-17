@@ -8,7 +8,22 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, RADIUS, FONT_SIZE, FONT_WEIGHT } from '../constants/theme';
 
 export default function OwnerBookingCard({ booking }) {
-  const { customerName, customerInitials, date, time, price, paymentMethod } = booking;
+  const {
+    customerName,
+    customerInitials,
+    date,
+    time,
+    price,
+    paymentMethod,
+    status,
+  } = booking;
+
+  const displayStatus = status
+    ? String(status)
+        .trim()
+        .toLowerCase()
+        .replace(/(^\w|\s\w)/g, (m) => m.toUpperCase())
+    : 'Upcoming';
 
   return (
     <View style={styles.card}>
@@ -29,7 +44,7 @@ export default function OwnerBookingCard({ booking }) {
 
       <View style={styles.right}>
         <Text style={styles.price}>৳ {price}</Text>
-        <Text style={styles.status}>Upcoming</Text>
+        <Text style={styles.status}>{displayStatus}</Text>
       </View>
     </View>
   );

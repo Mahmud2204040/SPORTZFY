@@ -22,9 +22,9 @@ export const RADIUS = {
 };
 
 export const FONT_SIZE = {
-  xs: 11,
-  sm: 13,
-  md: 15,
+  xs: 12,
+  sm: 14,
+  md: 16,
   lg: 17,
   xl: 20,
   xxl: 24,

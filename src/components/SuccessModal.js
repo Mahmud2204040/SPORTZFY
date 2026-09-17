@@ -1,6 +1,5 @@
-// Reusable success modal used by the Booking screen after a mock payment.
-// Shows a green checkmark, "Booking Confirmed!" title, summary rows,
-// and two action buttons passed in as children / props.
+// Success modal after booking confirmation.
+// Shows reference code, optional QR pass, and action buttons.
 
 import React from 'react';
 import {
@@ -10,6 +9,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   Pressable,
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import PrimaryButton from './PrimaryButton';
@@ -24,9 +24,11 @@ import {
 export default function SuccessModal({
   visible,
   bookingId,
+  qrCode,
   turfName,
   date,
   time,
+  price,
   onViewBookings,
   onDone,
 }) {
@@ -46,17 +48,36 @@ export default function SuccessModal({
 
           <Text style={styles.title}>Booking Confirmed!</Text>
           <Text style={styles.subtitle}>
-            Your turf has been booked successfully.
+            Your turf slot has been booked successfully.
           </Text>
 
+          {/* QR Code Pass */}
+          {qrCode ? (
+            <View style={styles.qrCard}>
+              <Image
+                source={{ uri: qrCode }}
+                style={styles.qrImage}
+                resizeMode="contain"
+              />
+              <Text style={styles.qrHint}>Show this QR at the venue</Text>
+            </View>
+          ) : null}
+
+          {/* Summary card */}
           <View style={styles.summaryCard}>
-            <SummaryRow label="Booking ID" value={bookingId} />
+            <SummaryRow label="Reference" value={bookingId || 'SPZ-XXXX'} highlight />
             <View style={styles.divider} />
             <SummaryRow label="Turf" value={turfName} />
             <View style={styles.divider} />
             <SummaryRow label="Date" value={date} />
             <View style={styles.divider} />
             <SummaryRow label="Time" value={time} />
+            {price != null && (
+              <>
+                <View style={styles.divider} />
+                <SummaryRow label="Total Paid" value={`৳${price}`} highlight />
+              </>
+            )}
           </View>
 
           <View style={styles.actions}>
@@ -75,11 +96,14 @@ export default function SuccessModal({
   );
 }
 
-function SummaryRow({ label, value }) {
+function SummaryRow({ label, value, highlight }) {
   return (
     <View style={styles.summaryRow}>
       <Text style={styles.summaryLabel}>{label}</Text>
-      <Text style={styles.summaryValue} numberOfLines={1}>
+      <Text
+        style={[styles.summaryValue, highlight && styles.summaryValueHighlight]}
+        numberOfLines={1}
+      >
         {value}
       </Text>
     </View>
@@ -100,6 +124,7 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS.xl,
     padding: SPACING.xl,
     alignItems: 'center',
+    maxHeight: '85%',
   },
   iconCircle: {
     width: 72,
@@ -122,6 +147,27 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: SPACING.lg,
   },
+
+  // QR
+  qrCard: {
+    alignItems: 'center',
+    marginBottom: SPACING.lg,
+    backgroundColor: '#FFFFFF',
+    borderRadius: RADIUS.lg,
+    padding: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  qrImage: {
+    width: 160,
+    height: 160,
+  },
+  qrHint: {
+    fontSize: FONT_SIZE.xs,
+    color: COLORS.textMuted,
+    marginTop: SPACING.xs,
+  },
+
   summaryCard: {
     width: '100%',
     backgroundColor: COLORS.background,
@@ -147,6 +193,10 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'right',
     marginLeft: SPACING.md,
+  },
+  summaryValueHighlight: {
+    color: COLORS.primary,
+    fontWeight: FONT_WEIGHT.bold,
   },
   divider: {
     height: 1,

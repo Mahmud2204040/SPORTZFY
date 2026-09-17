@@ -1,16 +1,7 @@
-// AuthContext — holds the signed-in user and exposes login / register / logout.
-//
-// Shape:
-//   user:  null (guest) | { id, name, phone, email, role }
-//   role:  derived from user.role  ('customer' | 'owner' | 'admin')
-//
-// Both `login` and `register` are mocked — they return a fake user after a
-// short delay so the UI can show a loading state. Replace with real API
-// calls later.
-//
-// Logout clears the user; RootNavigator then bounces back to AuthStack.
-
-import React, { createContext, useContext, useMemo, useState } from 'react';
+import React, { createContext, useContext, useMemo, useState, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { authApi } from '../api/auth';
+import { STORAGE_KEYS } from '../api/config';
 
 const AuthContext = createContext(null);
 
@@ -22,68 +13,117 @@ export function useAuth() {
   return ctx;
 }
 
-// Fake user factory — phone or email + any password "succeeds".
-function mockUserFor({ email, phone, name, role }) {
-  const id = `u_${Date.now().toString(36)}`;
-  return {
-    id,
-    name: name || deriveName(email, phone),
-    phone: phone || '',
-    email: email || '',
-    role,
-  };
-}
-
-function deriveName(email, phone) {
-  if (email && email.includes('@')) {
-    return email.split('@')[0];
-  }
-  if (phone) return `User ${phone.slice(-4)}`;
-  return 'Sportzfy User';
-}
-
 export function AuthProvider({ children }) {
-  // null = guest (shows AuthStack). Object = signed in (shows role stack).
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
 
-  // Promise-based so screens can await + show spinners.
-  async function login({ email, phone, password, role }) {
+  // Hydrate session from storage on app boot
+  useEffect(() => {
+    async function hydrateSession() {
+      try {
+        const storedUser = await AsyncStorage.getItem(STORAGE_KEYS.USER_PROFILE);
+        if (storedUser) {
+          const parsed = JSON.parse(storedUser);
+          setUser(parsed);
+          // Verify with server in background
+          try {
+            const meRes = await authApi.getMe();
+            if (meRes?.user) {
+              setUser(meRes.user);
+            } else {
+              // Backend responded but session is not valid for this request.
+              // Clear cached profile so protected screens don't act authenticated.
+              console.log('Session verification failed — clearing local session');
+              setUser(null);
+              await AsyncStorage.removeItem(STORAGE_KEYS.USER_PROFILE);
+              await AsyncStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+            }
+          } catch (e) {
+            // If server says unauthorized, we must log out.
+            // ApiClient already clears the stored token on 401.
+            if (e?.status === 401) {
+              console.log('Session verification failed (401) — clearing local session');
+              setUser(null);
+              await AsyncStorage.removeItem(STORAGE_KEYS.USER_PROFILE);
+              await AsyncStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+            } else {
+              console.log('Session verification expired or offline, keeping cached profile if present');
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to hydrate user from storage:', e);
+      } finally {
+        setLoading(false);
+        setInitialLoading(false);
+      }
+    }
+    hydrateSession();
+  }, []);
+
+  async function login({ email, password, role }) {
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 700));
-    const next = mockUserFor({ email, phone, role: role || 'customer' });
-    setUser(next);
-    setLoading(false);
-    return next;
+    try {
+      const res = await authApi.login({
+        email: email.trim(),
+        password,
+        requestedRole: role ? role.toUpperCase() : undefined,
+      });
+      const nextUser = res.user;
+      setUser(nextUser);
+      return nextUser;
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function register({ name, phone, email, password, role }) {
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 900));
-    const next = mockUserFor({ name, phone, email, role });
-    setUser(next);
-    setLoading(false);
-    return next;
+    try {
+      const res = await authApi.register({
+        name: name.trim(),
+        email: email.trim(),
+        password,
+        phone: phone ? phone.trim() : undefined,
+        role: role ? role.toUpperCase() : 'CUSTOMER',
+      });
+      const nextUser = res.user;
+      setUser(nextUser);
+      return nextUser;
+    } finally {
+      setLoading(false);
+    }
   }
 
-  function logout() {
-    setUser(null);
+  async function logout() {
+    setLoading(true);
+    try {
+      await authApi.logout();
+    } finally {
+      setUser(null);
+      setLoading(false);
+    }
   }
+
+  const role = useMemo(() => {
+    if (!user) return 'guest';
+    return (user.role || 'CUSTOMER').toLowerCase();
+  }, [user]);
 
   const value = useMemo(
     () => ({
       user,
-      role: user ? user.role : 'guest',
+      role,
       isAuthed: !!user,
       loading,
+      initialLoading,
       login,
       register,
       logout,
     }),
-    [user, loading]
+    [user, role, loading, initialLoading]
   );
 
-  return (
-    <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

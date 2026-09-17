@@ -1,33 +1,21 @@
-// App header used inside tab screens (Home, Explore, Bookings/Profile).
-// Shows the Sportzfy brand, current user location, and a location icon.
+// App header used inside tab screens (Home, Explore, Matches, Bookings, Profile).
+// Shows the Sportzfy brand mark and wordmark. Nothing else — location lives in
+// the Explore screen's filters, not the chrome.
 
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, FONT_WEIGHT } from '../constants/theme';
+import { COLORS, SPACING, RADIUS, FONT_SIZE, FONT_WEIGHT } from '../constants/theme';
 
-export default function Header({ location, onLocationPress, style }) {
+export default function Header({ style }) {
   return (
     <View style={[styles.container, style]}>
-      <View>
-        <Text style={styles.brand}>Sportzfy</Text>
-        <TouchableOpacity
-          style={styles.locationRow}
-          activeOpacity={0.7}
-          onPress={onLocationPress}
-        >
-          <Ionicons name="location-sharp" size={14} color={COLORS.white} />
-          <Text style={styles.location} numberOfLines={1}>
-            {location || 'Select location'}
-          </Text>
-          <Ionicons
-            name="chevron-down"
-            size={14}
-            color={COLORS.white}
-            style={{ marginLeft: 2 }}
-          />
-        </TouchableOpacity>
+      {/* Brand mark */}
+      <View style={styles.mark}>
+        <Ionicons name="football" size={20} color={COLORS.primary} />
       </View>
+
+      <Text style={styles.brand}>Sportzfy</Text>
     </View>
   );
 }
@@ -35,26 +23,25 @@ export default function Header({ location, onLocationPress, style }) {
 const styles = StyleSheet.create({
   container: {
     backgroundColor: COLORS.primary,
-    paddingTop: SPACING.xxl,
     paddingHorizontal: SPACING.lg,
-    paddingBottom: SPACING.lg,
+    paddingTop: SPACING.md,
+    paddingBottom: SPACING.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  mark: {
+    width: 34,
+    height: 34,
+    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: SPACING.sm,
   },
   brand: {
     color: COLORS.textOnPrimary,
     fontSize: FONT_SIZE.xxl,
     fontWeight: FONT_WEIGHT.bold,
     letterSpacing: 0.5,
-  },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: SPACING.xs,
-  },
-  location: {
-    color: COLORS.white,
-    fontSize: FONT_SIZE.sm,
-    fontWeight: FONT_WEIGHT.medium,
-    marginLeft: SPACING.xs,
-    maxWidth: 220,
   },
 });

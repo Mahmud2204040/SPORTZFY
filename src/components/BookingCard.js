@@ -40,6 +40,9 @@ export default function BookingCard({ booking, onPress, style }) {
           </View>
         </View>
 
+        {booking.referenceCode && (
+          <Text style={styles.refCode}>🎫 {booking.referenceCode}</Text>
+        )}
         <Text style={styles.line}>📅 {booking.date}</Text>
         <Text style={styles.line}>⏰ {booking.time}</Text>
 
@@ -93,6 +96,17 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE.xs,
     fontWeight: FONT_WEIGHT.semibold,
     textTransform: 'capitalize',
+  },
+  refCode: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: FONT_WEIGHT.bold,
+    color: COLORS.primary,
+    backgroundColor: '#F0FDF4',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 2,
+    borderRadius: RADIUS.pill,
+    alignSelf: 'flex-start',
+    marginBottom: 4,
   },
   line: {
     fontSize: FONT_SIZE.sm,

@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   Image,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,28 +13,93 @@ import { Ionicons } from '@expo/vector-icons';
 import PrimaryButton from '../../components/PrimaryButton';
 import PaymentMethodSelector from '../../components/PaymentMethodSelector';
 import SuccessModal from '../../components/SuccessModal';
+import { holdsApi } from '../../api/holds';
+import { bookingsApi } from '../../api/bookings';
 
-import { useBooking } from '../../context/BookingContext';
 import { COLORS, SPACING, RADIUS, FONT_SIZE, FONT_WEIGHT } from '../../constants/theme';
-
-// Generates a fake SPZ-#### booking ID.
-function generateBookingId() {
-  const num = Math.floor(1024 + Math.random() * 9000);
-  return `SPZ-${num}`;
-}
+import { formatCountdown } from '../../utils/dateUtils';
 
 export default function BookingScreen({ route, navigation }) {
-  // Read what TurfDetails passed us.
-  const { turf, date, slot } = route.params || {};
-  const { addBooking } = useBooking();
+  const { turfId, turf, date, dateISO, slot } = route.params || {};
 
-  // Payment method + processing + success modal state.
+  // Hold state
+  const [holdId, setHoldId] = useState(null);
+  const [holdPrice, setHoldPrice] = useState(null);
+  const [holdExpiresAt, setHoldExpiresAt] = useState(null);
+  const [holdLoading, setHoldLoading] = useState(true);
+  const [holdError, setHoldError] = useState('');
+
+  // Payment state
   const [method, setMethod] = useState('bKash');
   const [processing, setProcessing] = useState(false);
-  const [success, setSuccess] = useState(false);
-  const [bookingId, setBookingId] = useState(null);
 
-  // Safe guard for missing params.
+  // Countdown
+  const [remaining, setRemaining] = useState(0);
+  const timerRef = useRef(null);
+
+  // Success modal
+  const [success, setSuccess] = useState(false);
+  const [bookingRef, setBookingRef] = useState(null);
+  const [bookingQR, setBookingQR] = useState(null);
+
+  // Acquire hold on mount
+  const acquireHold = useCallback(async () => {
+    if (!turfId || !slot) return;
+    setHoldLoading(true);
+    setHoldError('');
+    try {
+      const res = await holdsApi.createHold({
+        turfId,
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+      });
+      if (res) {
+        setHoldId(res.id);
+        setHoldPrice(res.price);
+        setHoldExpiresAt(new Date(res.expiresAt).getTime());
+      }
+    } catch (err) {
+      console.log('Hold error:', err);
+      const msg = err?.message || 'Could not reserve the slot. It may be taken.';
+      setHoldError(msg);
+      Alert.alert('Slot Unavailable', msg, [
+        { text: 'Go Back', onPress: () => navigation.goBack() },
+      ]);
+    } finally {
+      setHoldLoading(false);
+    }
+  }, [turfId, slot, navigation]);
+
+  useEffect(() => {
+    acquireHold();
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [acquireHold]);
+
+  // Countdown timer tick
+  useEffect(() => {
+    if (!holdExpiresAt || success) return;
+
+    function tick() {
+      const diff = holdExpiresAt - Date.now();
+      setRemaining(diff);
+      if (diff <= 0) {
+        clearInterval(timerRef.current);
+        Alert.alert(
+          'Hold Expired',
+          'Your 5-minute hold has expired. Please go back and select the slot again.',
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
+        );
+      }
+    }
+
+    tick();
+    timerRef.current = setInterval(tick, 1000);
+    return () => clearInterval(timerRef.current);
+  }, [holdExpiresAt, navigation, success]);
+
+  // Guard for missing params
   if (!turf || !date || !slot) {
     return (
       <SafeAreaView style={styles.safe}>
@@ -44,40 +110,42 @@ export default function BookingScreen({ route, navigation }) {
     );
   }
 
-  const price = turf.pricePerHour;
-  const timeLabel = `${slot.startTime} – ${slot.endTime}`;
+  const imageUri = turf.coverImage || (turf.images?.[0]?.url) || 'https://images.unsplash.com/photo-1551958219-acbc608c6377?w=800&q=80';
+  const locationText = turf.area ? `${turf.area}, ${turf.city || 'Chattogram'}` : (turf.address || 'Chattogram');
+  const timeLabel = slot.timeLabel || `${slot.startTime} – ${slot.endTime}`;
+  const price = holdPrice || slot.price || turf.basePricePerHour || 0;
+  const isUrgent = remaining > 0 && remaining < 60000; // < 1 min
+  const progress = holdExpiresAt ? Math.max(0, remaining / 300000) : 0; // 300s = 5 min
 
-  function handleConfirm() {
+  async function handleConfirm() {
+    if (!holdId) return;
     setProcessing(true);
-    // Mock network delay (1.2s) — replace with real payment API later.
-    setTimeout(() => {
-      const id = generateBookingId();
-      setBookingId(id);
-      addBooking({
-        id,
-        turfId: turf.id,
-        turfName: turf.name,
-        turfImage: turf.image,
-        date,
-        time: timeLabel,
-        price,
-        status: 'upcoming',
+    try {
+      const res = await bookingsApi.confirmBooking({
+        holdId,
         paymentMethod: method,
       });
+      if (res) {
+        setBookingRef(res.referenceCode);
+        setBookingQR(null);
+        setSuccess(true);
+      }
+    } catch (err) {
+      console.log('Booking error:', err);
+      const msg = err?.message || 'Payment failed. Please try again.';
+      Alert.alert('Payment Failed', msg);
+    } finally {
       setProcessing(false);
-      setSuccess(true);
-    }, 1200);
+    }
   }
 
   function handleViewBookings() {
     setSuccess(false);
-    // Pop back to root tabs and switch to the Bookings tab.
     navigation.navigate('MainTabs', { screen: 'Bookings' });
   }
 
   function handleDone() {
     setSuccess(false);
-    // Pop back to the root tabs Home.
     navigation.navigate('MainTabs', { screen: 'Home' });
   }
 
@@ -88,19 +156,51 @@ export default function BookingScreen({ route, navigation }) {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
+        {/* 5-Minute Countdown Timer */}
+        <View style={[styles.timerCard, isUrgent && styles.timerCardUrgent]}>
+          <View style={styles.timerRow}>
+            <Ionicons
+              name="time-outline"
+              size={22}
+              color={isUrgent ? '#DC2626' : COLORS.primary}
+            />
+            <View style={{ flex: 1, marginLeft: SPACING.sm }}>
+              <Text style={[styles.timerTitle, isUrgent && { color: '#DC2626' }]}>
+                {holdLoading ? 'Acquiring hold...' : isUrgent ? '⚠️ Expiring soon!' : 'Slot Reserved'}
+              </Text>
+              <Text style={styles.timerSub}>
+                {holdLoading
+                  ? 'Locking your slot...'
+                  : `${formatCountdown(remaining)} remaining to complete payment`}
+              </Text>
+            </View>
+            <Text style={[styles.timerCountdown, isUrgent && { color: '#DC2626' }]}>
+              {holdLoading ? '--:--' : formatCountdown(remaining)}
+            </Text>
+          </View>
+          {/* Progress bar */}
+          <View style={styles.progressTrack}>
+            <View
+              style={[
+                styles.progressBar,
+                {
+                  width: `${progress * 100}%`,
+                  backgroundColor: isUrgent ? '#DC2626' : COLORS.primary,
+                },
+              ]}
+            />
+          </View>
+        </View>
+
         {/* Booking summary card */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Booking Summary</Text>
 
           <View style={styles.turfRow}>
-            <Image source={{ uri: turf.image }} style={styles.thumb} />
+            <Image source={{ uri: imageUri }} style={styles.thumb} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.turfName} numberOfLines={1}>
-                {turf.name}
-              </Text>
-              <Text style={styles.turfLocation} numberOfLines={1}>
-                 {turf.location}
-              </Text>
+              <Text style={styles.turfName} numberOfLines={1}>{turf.name}</Text>
+              <Text style={styles.turfLocation} numberOfLines={1}>📍 {locationText}</Text>
             </View>
           </View>
 
@@ -109,12 +209,22 @@ export default function BookingScreen({ route, navigation }) {
           <Row icon="calendar-outline" label="Date" value={date} />
           <Row icon="time-outline" label="Time" value={timeLabel} />
           <Row icon="hourglass-outline" label="Duration" value="1 hour" />
+          {slot.multiplier && slot.multiplier !== 1 && (
+            <Row
+              icon="analytics-outline"
+              label="ML Multiplier"
+              value={`${slot.multiplier}x ${slot.badgeText ? `(${slot.badgeText})` : ''}`}
+            />
+          )}
         </View>
 
         {/* Price breakdown */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Price Details</Text>
-          <Row icon="pricetag-outline" label="Price" value={`৳${price}`} />
+          <Row icon="pricetag-outline" label="Slot Price" value={`৳${price}`} />
+          {slot.basePrice && slot.basePrice !== price && (
+            <Row icon="information-circle-outline" label="Base Price" value={`৳${slot.basePrice}`} />
+          )}
           <View style={styles.divider} />
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>Total</Text>
@@ -125,31 +235,49 @@ export default function BookingScreen({ route, navigation }) {
         {/* Payment methods */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Payment Method</Text>
+          <Text style={styles.demoLabel}>Demo payment — no money charged</Text>
           <PaymentMethodSelector selected={method} onSelect={setMethod} />
         </View>
 
-        <View style={{ height: 100 }} />
+        {holdError ? (
+          <View style={styles.errorCard}>
+            <Ionicons name="alert-circle" size={20} color={COLORS.danger} />
+            <Text style={styles.errorCardText}>{holdError}</Text>
+          </View>
+        ) : null}
+
+        <View style={{ height: 120 }} />
       </ScrollView>
 
       {/* Sticky bottom CTA */}
       <View style={styles.bottomBar}>
-        <PrimaryButton
-          title={
-            processing
-              ? 'Processing...'
-              : `Confirm & Pay ৳${price}`
-          }
-          loading={processing}
-          onPress={handleConfirm}
-        />
+        <View style={styles.bottomPriceWrap}>
+          <Text style={styles.bottomTotal}>৳{price}</Text>
+        </View>
+        <View style={{ flex: 1 }}>
+          <PrimaryButton
+            title={
+              holdLoading
+                ? 'Reserving...'
+                : processing
+                ? 'Processing...'
+                : `Confirm & Pay ৳${price}`
+            }
+            loading={holdLoading || processing}
+            disabled={!!holdError || holdLoading || remaining <= 0}
+            onPress={handleConfirm}
+          />
+        </View>
       </View>
 
       <SuccessModal
         visible={success}
-        bookingId={bookingId}
+        bookingId={bookingRef}
+        qrCode={bookingQR}
         turfName={turf.name}
         date={date}
         time={timeLabel}
+        price={price}
         onViewBookings={handleViewBookings}
         onDone={handleDone}
       />
@@ -157,7 +285,6 @@ export default function BookingScreen({ route, navigation }) {
   );
 }
 
-// Small reusable summary row used in summary & price cards.
 function Row({ icon, label, value }) {
   return (
     <View style={styles.row}>
@@ -181,6 +308,52 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: SPACING.lg,
   },
+
+  // Timer
+  timerCard: {
+    backgroundColor: '#F0F9FF',
+    borderRadius: RADIUS.lg,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+    borderWidth: 1,
+    borderColor: '#BAE6FD',
+  },
+  timerCardUrgent: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+  },
+  timerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  timerTitle: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: FONT_WEIGHT.bold,
+    color: COLORS.primary,
+  },
+  timerSub: {
+    fontSize: FONT_SIZE.xs,
+    color: COLORS.textMuted,
+    marginTop: 2,
+  },
+  timerCountdown: {
+    fontSize: FONT_SIZE.xl,
+    fontWeight: FONT_WEIGHT.bold,
+    color: COLORS.primary,
+  },
+  progressTrack: {
+    height: 4,
+    backgroundColor: '#E5E7EB',
+    borderRadius: 2,
+    marginTop: SPACING.sm,
+    overflow: 'hidden',
+  },
+  progressBar: {
+    height: '100%',
+    borderRadius: 2,
+  },
+
+  // Cards
   card: {
     backgroundColor: COLORS.card,
     borderRadius: RADIUS.lg,
@@ -195,6 +368,7 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     marginBottom: SPACING.md,
   },
+  demoLabel: { color: '#166534', fontSize: FONT_SIZE.sm, marginBottom: SPACING.sm },
 
   turfRow: {
     flexDirection: 'row',
@@ -262,6 +436,23 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
   },
 
+  errorCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF2F2',
+    borderRadius: RADIUS.md,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    gap: SPACING.sm,
+  },
+  errorCardText: {
+    flex: 1,
+    fontSize: FONT_SIZE.sm,
+    color: '#B91C1C',
+  },
+
   bottomBar: {
     position: 'absolute',
     left: 0,
@@ -272,6 +463,17 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.md,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
+  },
+  bottomPriceWrap: {
+    minWidth: 70,
+  },
+  bottomTotal: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: FONT_WEIGHT.bold,
+    color: COLORS.primary,
   },
 
   center: {

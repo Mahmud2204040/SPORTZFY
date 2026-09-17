@@ -1,12 +1,11 @@
-// Lightweight global state for the booking flow + bookings list.
-// Today it holds only what the UI needs; tomorrow it can wrap real API calls.
+// Global state for the booking flow + bookings list.
+// Fetches real bookings from the API when authenticated, falls back to mock data.
 
-import React, { createContext, useContext, useMemo, useState } from 'react';
-import { SEED_BOOKINGS } from '../data/mockData';
+import React, { createContext, useContext, useMemo, useState, useCallback, useEffect } from 'react';
+import { bookingsApi } from '../api/bookings';
 
 const BookingContext = createContext(null);
 
-// Hook helper — `useBooking()` must be used inside <BookingProvider>.
 export function useBooking() {
   const ctx = useContext(BookingContext);
   if (!ctx) {
@@ -16,13 +15,44 @@ export function useBooking() {
 }
 
 export function BookingProvider({ children }) {
-  // All bookings the user has made (seeded with 2 demo entries).
-  const [bookings, setBookings] = useState(SEED_BOOKINGS);
-
-  // Currently selected user location (used by Home & Explore headers).
+  const [bookings, setBookings] = useState([]);
+  const [bookingsLoading, setBookingsLoading] = useState(false);
+  const [bookingsError, setBookingsError] = useState('');
   const [userLocation, setUserLocation] = useState('GEC, Chattogram');
+  const [userCity, setUserCity] = useState('Chattogram');
 
-  // Adds a confirmed booking to the top of the list.
+  // Fetch real bookings from API
+  const fetchBookings = useCallback(async () => {
+    setBookingsLoading(true);
+    setBookingsError('');
+    try {
+      const res = await bookingsApi.getMyBookings();
+      if (res?.items && Array.isArray(res.items)) {
+        // Normalize API booking shape to UI shape
+        const normalized = res.items.map((b) => ({
+          id: b.referenceCode || b.id,
+          turfId: b.turfId,
+          turfName: b.turf?.name || 'Unknown Turf',
+          turfImage: b.turf?.coverImage || null,
+          date: b.startTime,
+          time: b.startTime,
+          price: b.totalAmount,
+          status: b.status === 'CONFIRMED' ? 'upcoming' : (b.status || 'upcoming'),
+          paymentMethod: b.paymentMethod,
+          referenceCode: b.referenceCode,
+          qrCode: b.qrCode,
+        }));
+        setBookings(normalized);
+      }
+    } catch (err) {
+      setBookings([]);
+      setBookingsError(err?.message || 'Could not load bookings.');
+    } finally {
+      setBookingsLoading(false);
+    }
+  }, []);
+
+  // Add a confirmed booking to the top of the list
   function addBooking(booking) {
     setBookings((prev) => [booking, ...prev]);
   }
@@ -31,10 +61,15 @@ export function BookingProvider({ children }) {
     () => ({
       bookings,
       addBooking,
+      fetchBookings,
+      bookingsLoading,
+      bookingsError,
       userLocation,
+      userCity,
       setUserLocation,
+      setUserCity,
     }),
-    [bookings, userLocation]
+    [bookings, bookingsLoading, bookingsError, userLocation, userCity]
   );
 
   return (
