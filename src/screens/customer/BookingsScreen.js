@@ -40,7 +40,7 @@ export default function BookingsScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <Header />
+      <Header section="Your activity" title="Bookings" subtitle="Your upcoming and past reservations" />
 
       {!user ? <View style={styles.empty}><Ionicons name="lock-closed-outline" size={36} color={COLORS.textMuted}/><Text style={styles.emptyTitle}>Sign in to view bookings</Text></View> : <BookingsView
         statusTab={statusTab}

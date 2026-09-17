@@ -18,18 +18,19 @@ export async function POST(
     const body = await request.json();
     const { status } = body;
 
-    if (!status || (status !== "APPROVED" && status !== "REJECTED" && status !== "PENDING_REVIEW")) {
+    if (status !== "APPROVED" && status !== "REJECTED") {
       return NextResponse.json(
         { error: { code: "BAD_REQUEST", message: "Invalid approval status." } },
         { status: 400 }
       );
     }
 
-    const updatedTurf = await prisma.turf.update({
-      where: { id },
-      data: { status },
-      include: { owner: true },
-    });
+    const result = await prisma.turf.updateMany({ where: { id, status: "PENDING_REVIEW" }, data: { status } });
+    if (result.count === 0) {
+      const current = await prisma.turf.findUnique({ where: { id }, select: { status: true } });
+      return NextResponse.json({ error: { code: current ? "CONFLICT" : "NOT_FOUND", message: current ? "This submission has already been reviewed. Refresh the queue." : "Venue submission not found." } }, { status: current ? 409 : 404 });
+    }
+    const updatedTurf = await prisma.turf.findUniqueOrThrow({ where: { id }, include: { owner: { select: { id: true, name: true, email: true } } } });
 
     return NextResponse.json({
       data: updatedTurf,

@@ -130,7 +130,7 @@ export default function ExploreScreen({ navigation, route }) {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <Header />
+      <Header section="Explore" title="Browse venues" subtitle="Find a pitch that fits your game" />
 
       {/* Search + filter row */}
       <View style={styles.searchRow}>

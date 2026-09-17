@@ -46,6 +46,7 @@ export async function POST(request: NextRequest) {
         { status: 401 }
       );
     }
+    const playerId = player.id;
 
     // Atomic Transaction for hold acquisition
     const hold = await prisma.$transaction(async (tx) => {
@@ -130,7 +131,7 @@ export async function POST(request: NextRequest) {
       const newHold = await tx.hold.create({
         data: {
           turfId,
-          userId: player.id,
+          userId: playerId,
           startTime: slotStart,
           endTime: slotEnd,
           price: authenticPrice, // Server-calculated price

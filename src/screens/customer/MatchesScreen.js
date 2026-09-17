@@ -107,7 +107,7 @@ export default function MatchesScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <Header />
+      <Header section="Community" title="Open matches" subtitle="Find a squad and join the game" />
 
       <View style={styles.toggleRow}>
         <SegmentedControl options={VIEW_OPTIONS} value={view} onChange={setView} />

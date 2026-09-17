@@ -20,9 +20,10 @@ export default function MainStack() {
   return (
     <Stack.Navigator
       screenOptions={{
-        headerStyle: { backgroundColor: COLORS.primary },
-        headerTintColor: COLORS.textOnPrimary,
-        headerTitleStyle: { fontWeight: '600' },
+        headerStyle: { backgroundColor: COLORS.card },
+        headerTintColor: COLORS.primaryDark,
+        headerTitleStyle: { fontWeight: '700', color: COLORS.textPrimary },
+        headerShadowVisible: false,
       }}
     >
       <Stack.Screen

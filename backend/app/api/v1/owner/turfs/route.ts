@@ -86,12 +86,12 @@ export async function POST(request: NextRequest) {
         hasWashroom: Boolean(hasWashroom),
         hasChangingRoom: Boolean(hasChangingRoom),
         hasWater: Boolean(hasWater),
-        status: "APPROVED", // Approved for immediate demonstration
+        status: "PENDING_REVIEW",
       },
     });
 
     return NextResponse.json(
-      { data: newTurf, message: "Venue listing created successfully." },
+      { data: newTurf, message: "Venue submitted for administrator review." },
       { status: 201 }
     );
   } catch (error) {

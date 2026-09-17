@@ -155,7 +155,7 @@ export default function HomeScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <Header />
+      <Header section="Discover" title="Find your next game" subtitle={`Venues near ${userCity || 'you'}`} />
 
       <ScrollView
         style={styles.container}

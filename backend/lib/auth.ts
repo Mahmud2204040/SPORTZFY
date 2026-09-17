@@ -21,7 +21,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
       : null;
 
   const cookieStore = await cookies();
-  const cookieToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+  const cookieToken = cookieStore.get(SESSION_COOKIE_NAME)?.value ?? null;
 
   async function getUserFromToken(token: string | null) {
     if (!token) return null;

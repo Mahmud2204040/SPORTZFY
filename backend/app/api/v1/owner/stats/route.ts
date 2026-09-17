@@ -15,7 +15,7 @@ export async function GET(_request: NextRequest) {
 
     const ownerWhere = currentUser.role === "ADMIN" ? { role: "OWNER" } : { id: currentUser.id };
 
-    // Fetch authenticated owner user or first owner for demo
+    // Fetch the authenticated owner's recorded venues and bookings.
     const owner = await prisma.user.findFirst({
       where: ownerWhere,
       include: {
@@ -49,6 +49,7 @@ export async function GET(_request: NextRequest) {
       where: {
         turfId: { in: ownedTurfs.map((t) => t.id) },
         status: "CONFIRMED",
+        startTime: { gte: new Date() },
       },
       include: {
         turf: { select: { name: true, area: true } },
@@ -58,11 +59,12 @@ export async function GET(_request: NextRequest) {
       take: 5,
     });
 
-    // Real In-Process Random Forest Demand Forecasting & Dynamic Rate Suggestions
+    // Show model suggestions only when this venue has enough recorded inputs.
     const primaryTurf = ownedTurfs[0];
-    const baseRate = primaryTurf?.basePricePerHour || 1500;
-    const turfName = primaryTurf?.name || "Eco Sports Halishahar Arena";
-    const venueRating = primaryTurf?.rating || 4.8;
+    const recentCutoff = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000);
+    const recentBookings = primaryTurf?.bookings.filter((booking) => booking.createdAt >= recentCutoff) || [];
+    const enoughHistory = !!primaryTurf && recentBookings.length >= 8;
+    const historicalDensity = Math.min(0.95, recentBookings.length / (28 * 8));
 
     // 1. Next Friday 8:00 PM BST (Peak floodlight window)
     const nextFridayPrime = new Date();
@@ -70,11 +72,10 @@ export async function GET(_request: NextRequest) {
     nextFridayPrime.setUTCDate(nextFridayPrime.getUTCDate() + daysUntilFriday);
     nextFridayPrime.setUTCHours(14, 0, 0, 0); // 14:00 UTC = 20:00 BST
 
-    const primeQuote = calculateDynamicSlotPrice(baseRate, nextFridayPrime, {
-      venueRating,
-      historicalDensity: 0.88,
-      isRainy: false,
-    });
+    const primeQuote = enoughHistory ? calculateDynamicSlotPrice(primaryTurf.basePricePerHour, nextFridayPrime, {
+      venueRating: primaryTurf.rating,
+      historicalDensity,
+    }) : null;
 
     // 2. Next Monday 4:00 PM BST (Off-peak afternoon saver)
     const nextMondayOffPeak = new Date();
@@ -82,33 +83,36 @@ export async function GET(_request: NextRequest) {
     nextMondayOffPeak.setUTCDate(nextMondayOffPeak.getUTCDate() + daysUntilMonday);
     nextMondayOffPeak.setUTCHours(10, 0, 0, 0); // 10:00 UTC = 16:00 BST
 
-    const offPeakQuote = calculateDynamicSlotPrice(baseRate, nextMondayOffPeak, {
-      venueRating,
-      historicalDensity: 0.28,
-      isRainy: false,
-    });
+    const offPeakQuote = enoughHistory ? calculateDynamicSlotPrice(primaryTurf.basePricePerHour, nextMondayOffPeak, {
+      venueRating: primaryTurf.rating,
+      historicalDensity,
+    }) : null;
 
-    const aiPricingInsights = [
+    const aiPricingInsights = !primaryTurf || !primeQuote || !offPeakQuote ? [] : [
       {
         id: "insight-peak",
-        turfName,
-        targetWindow: "Friday & Saturday • 8:00 PM – 11:00 PM BST",
+        turfId: primaryTurf.id,
+        turfName: primaryTurf.name,
+        targetWindow: "Friday · 8:00 PM Asia/Dhaka",
         demandTag: "Peak Hours",
-        demandProbability: Math.round(primeQuote.demandScore * 100),
-        currentRate: baseRate,
+        historicalBookings: recentBookings.length,
+        dataBasis: `${recentBookings.length} confirmed bookings recorded in the last 28 days`,
+        currentRate: primaryTurf.basePricePerHour,
         suggestedRate: primeQuote.finalPrice,
-        recommendation: `Heavy player traffic on weekend evenings. Increasing to ৳${primeQuote.finalPrice}/hr (+${Math.round((primeQuote.multiplier - 1) * 100)}%) maximizes revenue during high-demand floodlit slots.`,
+        recommendation: `Model quote for this Friday slot: ৳${primeQuote.finalPrice}/hr. Current base rate: ৳${primaryTurf.basePricePerHour}/hr. Review the schedule before changing your base rate.`,
         tag: "Peak Slot Recommendation",
       },
       {
         id: "insight-offpeak",
-        turfName,
-        targetWindow: "Weekday Afternoons • 4:00 PM – 6:00 PM BST",
+        turfId: primaryTurf.id,
+        turfName: primaryTurf.name,
+        targetWindow: "Monday · 4:00 PM Asia/Dhaka",
         demandTag: "Saver Slot",
-        demandProbability: Math.round(offPeakQuote.demandScore * 100),
-        currentRate: baseRate,
+        historicalBookings: recentBookings.length,
+        dataBasis: `${recentBookings.length} confirmed bookings recorded in the last 28 days`,
+        currentRate: primaryTurf.basePricePerHour,
         suggestedRate: offPeakQuote.finalPrice,
-        recommendation: `Weekday afternoon slots typically have lower booking volume. Offering a saver rate of ৳${offPeakQuote.finalPrice}/hr (${Math.round((1 - offPeakQuote.multiplier) * 100)}% off) attracts student squads and fills idle hours.`,
+        recommendation: `Model quote for this Monday slot: ৳${offPeakQuote.finalPrice}/hr. Current base rate: ৳${primaryTurf.basePricePerHour}/hr. Review the schedule before changing your base rate.`,
         tag: "Off-Peak Saver Promotion",
       },
     ];
@@ -124,7 +128,7 @@ export async function GET(_request: NextRequest) {
           totalVenues: ownedTurfs.length,
           totalBookings: totalBookingsCount,
           totalRevenue,
-          occupancyRate: 82, // percentage
+          occupancyRate: null,
         },
         ownedTurfs: ownedTurfs.map((t) => ({
           id: t.id,
@@ -134,6 +138,7 @@ export async function GET(_request: NextRequest) {
           basePricePerHour: t.basePricePerHour,
           pitchFormats: t.pitchFormats,
           rating: t.rating,
+          reviewCount: t.reviewCount,
           status: t.status,
           coverImage: t.coverImage,
           activeBookingsCount: t.bookings.length,
@@ -141,6 +146,8 @@ export async function GET(_request: NextRequest) {
         })),
         upcomingBookings,
         aiPricingInsights,
+        dataBasis: "Recorded confirmed bookings",
+        paymentMode: "DEMO",
       },
     });
   } catch (error) {

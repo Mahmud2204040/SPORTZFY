@@ -1,26 +1,20 @@
 // OwnerDashboardScreen — Turf Owner's home tab.
 // Shows a greeting, KPI grid, AI insight, My Turf card, and upcoming bookings.
 
-import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, ImageBackground } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 
 import SectionTitle from '../../components/SectionTitle';
 import OwnerStatCard from '../../components/OwnerStatCard';
 import OwnerBookingCard from '../../components/OwnerBookingCard';
 import TurfInfoCard from '../../components/TurfInfoCard';
 import AIInsightCard from '../../components/AIInsightCard';
+import Header from '../../components/Header';
 
 import { ownerApi } from '../../api/owner';
 
-import {
-  OWNER_PROFILE,
-  OWNER_STATS,
-  OWNER_TURF_CARD,
-  OWNER_AI_INSIGHT,
-  OWNER_UPCOMING_BOOKINGS,
-} from '../../data/ownerMockData';
 import { COLORS, SPACING, RADIUS, FONT_SIZE, FONT_WEIGHT } from '../../constants/theme';
 
 function getCustomerInitials(name) {
@@ -51,28 +45,35 @@ function formatDhakaTime(iso) {
   });
 }
 
-export default function OwnerDashboardScreen() {
+export default function OwnerDashboardScreen({ navigation }) {
   const [statsData, setStatsData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  useEffect(() => {
+  const load = useCallback(() => {
     (async () => {
       setLoading(true);
+      setError('');
       try {
         const res = await ownerApi.getStats();
         setStatsData(res || null);
       } catch (err) {
-        console.log('Error fetching owner stats:', err?.message);
-        // Keep mock fallback.
+        setStatsData(null);
+        setError(err?.message || 'Could not load owner dashboard.');
       } finally {
         setLoading(false);
       }
     })();
   }, []);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const kpiCards = useMemo(() => {
-    const fallback = OWNER_STATS;
-    if (!statsData?.stats) return fallback;
+    const templates = [
+      { label: 'Upcoming bookings', icon: 'calendar-outline', tint: '#E8F4EC', iconColor: COLORS.primaryDark },
+      { label: 'Upcoming value', icon: 'cash-outline', tint: '#FFF7E6', iconColor: '#A86600' },
+      { label: 'Total bookings', icon: 'receipt-outline', tint: '#EEF2FF', iconColor: '#4F46E5' },
+      { label: 'Your venues', icon: 'football-outline', tint: '#F1EAF8', iconColor: '#7C3AED' },
+    ];
 
     const upcoming = statsData?.upcomingBookings || [];
     const upcomingRevenue = upcoming.reduce((sum, b) => sum + (b.totalAmount || 0), 0);
@@ -80,66 +81,63 @@ export default function OwnerDashboardScreen() {
 
     return [
       {
-        ...fallback[0],
+        ...templates[0],
         value: String(upcomingCount),
       },
       {
-        ...fallback[1],
+        ...templates[1],
         value: `৳ ${upcomingRevenue.toLocaleString()}`,
       },
       {
-        ...fallback[2],
-        value: String(statsData.stats.totalBookings || 0),
+        ...templates[2],
+        value: String(statsData?.stats?.totalBookings || 0),
       },
       {
-        ...fallback[3],
-        value: String(statsData.stats.totalVenues || 0),
+        ...templates[3],
+        value: String(statsData?.stats?.totalVenues || 0),
       },
     ];
   }, [statsData]);
 
   const heroTurf = useMemo(() => {
-    const fallback = OWNER_TURF_CARD;
     const t = statsData?.ownedTurfs?.[0];
-    if (!t) return fallback;
-
-    const totalSlotsEstimate = (t.activeBookingsCount || 0) + (t.blockedIntervalsCount || 0);
+    if (!t) return null;
 
     return {
       name: t.name,
       location: `${t.area || ''}, ${t.city || ''}`.trim().replace(/,$/, ''),
       rating: t.rating || 0,
-      reviewCount: 0,
+      reviewCount: t.reviewCount || 0,
       pricePerHour: t.basePricePerHour || 0,
       bookedSlots: t.activeBookingsCount || 0,
-      totalSlots: Math.max(1, totalSlotsEstimate),
-      image: t.coverImage || fallback.image,
+      totalSlots: null,
+      image: t.coverImage || undefined,
     };
   }, [statsData]);
 
   const aiInsights = useMemo(() => {
     const list = statsData?.aiPricingInsights;
     if (!Array.isArray(list) || list.length === 0) {
-      return [OWNER_AI_INSIGHT];
+      return [];
     }
 
     return list.map((insight) => ({
       title: insight.turfName || 'Pricing Insight',
       body: insight.recommendation || '',
-      cta: 'Apply Suggestion',
+      cta: 'View venue',
       icon: 'sparkles-outline',
       demandTag: insight.demandTag || insight.tag || null,
       targetWindow: insight.targetWindow || null,
       currentRate: insight.currentRate || null,
       suggestedRate: insight.suggestedRate || null,
       demandProbability: insight.demandProbability || null,
+      dataBasis: insight.dataBasis || null,
     }));
   }, [statsData]);
 
   const upcomingCards = useMemo(() => {
-    const fallback = OWNER_UPCOMING_BOOKINGS;
     const list = statsData?.upcomingBookings;
-    if (!Array.isArray(list) || list.length === 0) return fallback;
+    if (!Array.isArray(list) || list.length === 0) return [];
 
     return list.map((b) => {
       const start = b.startTime;
@@ -148,7 +146,7 @@ export default function OwnerDashboardScreen() {
         id: b.id || b.referenceCode || `SPZ-${Date.now()}`,
         customerName: b.user?.name || 'Customer',
         customerInitials: getCustomerInitials(b.user?.name || ''),
-        turfName: b.turf?.name || heroTurf.name,
+        turfName: b.turf?.name || 'Venue',
         date: formatDhakaDate(start),
         time: `${formatDhakaTime(start)} – ${formatDhakaTime(end)}`,
         price: b.totalAmount || 0,
@@ -156,31 +154,19 @@ export default function OwnerDashboardScreen() {
         status: 'upcoming',
       };
     });
-  }, [heroTurf.name, statsData]);
+  }, [statsData]);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+      <Header section="Venue partner" title="Business overview" subtitle={statsData?.owner?.name ? `Welcome back, ${statsData.owner.name}` : 'Your venues and upcoming activity'} />
       <ScrollView
         style={styles.container}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* Green header: avatar + greeting + bell */}
-        <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{OWNER_PROFILE.initials}</Text>
-            </View>
-            <View>
-              <Text style={styles.welcome}>Welcome back,</Text>
-              <Text style={styles.name}>{statsData?.owner?.name || OWNER_PROFILE.name}</Text>
-            </View>
-          </View>
-          <View style={styles.bell}>
-            <Ionicons name="notifications-outline" size={20} color={COLORS.textOnPrimary} />
-          </View>
-        </View>
-
+        {error ? <View style={styles.messageCard}><Text style={styles.messageText}>{error}</Text><Pressable accessibilityRole="button" onPress={load}><Text style={styles.retryText}>Retry</Text></Pressable></View> : null}
+        {loading ? <View style={styles.messageCard}><Text style={styles.messageText}>Loading your business activity…</Text></View> : null}
+        {!loading && !error ? <>
         {/* KPI grid: 2x2 of stat tiles */}
         <View style={styles.kpiGrid}>
           <View style={styles.kpiRow}>
@@ -198,9 +184,10 @@ export default function OwnerDashboardScreen() {
         {/* AI pricing insights */}
         <SectionTitle title="AI Pricing Recommendations" />
         <View style={styles.section}>
-          {aiInsights.map((insight, idx) => (
+          {aiInsights.length === 0 ? <Text style={styles.messageText}>Not enough booking history for an insight yet.</Text> : aiInsights.map((insight, idx) => (
             <View key={insight.id || idx} style={{ marginBottom: SPACING.sm }}>
-              <AIInsightCard insight={insight} onPress={() => {}} />
+              <AIInsightCard insight={insight} onPress={() => navigation.navigate('Turf')} />
+              {insight.dataBasis ? <Text style={styles.basisText}>{insight.dataBasis}</Text> : null}
             </View>
           ))}
         </View>
@@ -208,16 +195,17 @@ export default function OwnerDashboardScreen() {
         {/* My Turf */}
         <SectionTitle title="My Turf" />
         <View style={styles.section}>
-          <TurfInfoCard turf={heroTurf} />
+          {heroTurf ? <TurfInfoCard turf={heroTurf} /> : <Text style={styles.messageText}>No venues linked to your account.</Text>}
         </View>
 
         {/* Upcoming Bookings */}
-        <SectionTitle title={loading ? 'Upcoming Bookings' : 'Upcoming Bookings'} />
+        <SectionTitle title="Upcoming Bookings" />
         <View style={styles.section}>
-          {upcomingCards.map((booking) => (
+          {upcomingCards.length === 0 ? <Text style={styles.messageText}>No upcoming bookings.</Text> : upcomingCards.map((booking) => (
             <OwnerBookingCard key={booking.id} booking={booking} />
           ))}
         </View>
+        </> : null}
 
         {/* Bottom padding so the last card clears the tab bar */}
         <View style={{ height: SPACING.xxl }} />
@@ -237,52 +225,6 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: SPACING.lg,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.lg,
-    borderBottomLeftRadius: RADIUS.lg,
-    borderBottomRightRadius: RADIUS.lg,
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: COLORS.primaryDark,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.md,
-  },
-  avatarText: {
-    color: COLORS.textOnPrimary,
-    fontWeight: FONT_WEIGHT.bold,
-    fontSize: FONT_SIZE.md,
-  },
-  welcome: {
-    fontSize: FONT_SIZE.xs,
-    color: COLORS.textOnPrimary,
-    opacity: 0.8,
-  },
-  name: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: FONT_WEIGHT.bold,
-    color: COLORS.textOnPrimary,
-  },
-  bell: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.primaryDark,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   kpiGrid: {
     paddingHorizontal: SPACING.lg,
     marginTop: SPACING.lg,
@@ -295,4 +237,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.lg,
     marginTop: SPACING.lg,
   },
+  messageCard: { marginHorizontal: SPACING.lg, marginTop: SPACING.md, padding: SPACING.md, backgroundColor: COLORS.card, borderRadius: RADIUS.lg },
+  messageText: { color: COLORS.textSecondary, fontSize: FONT_SIZE.sm, lineHeight: 20 },
+  basisText: { color: COLORS.textMuted, fontSize: FONT_SIZE.xs, marginTop: SPACING.xs, paddingHorizontal: SPACING.sm },
+  retryText: { color: COLORS.primaryDark, fontSize: FONT_SIZE.sm, fontWeight: FONT_WEIGHT.bold, marginTop: SPACING.sm },
 });

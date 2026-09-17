@@ -18,10 +18,6 @@ import { COLORS, SPACING, RADIUS, FONT_SIZE, FONT_WEIGHT } from '../../constants
 export default function ProfileScreen({ navigation }) {
   const { user, logout } = useAuth();
 
-  if (!user) {
-    return <SafeAreaView style={styles.safe} edges={['top']}><Header /><View style={styles.guestState}><Ionicons name="person-circle-outline" size={64} color={COLORS.primary}/><Text style={styles.guestTitle}>Sign in to manage your profile</Text><TouchableOpacity style={styles.guestButton} onPress={() => navigation.navigate('SignIn')}><Text style={styles.guestButtonText}>Sign in</Text></TouchableOpacity></View></SafeAreaView>;
-  }
-
   const [myMatchesSummary, setMyMatchesSummary] = useState(null);
   const [matchesLoading, setMatchesLoading] = useState(false);
 
@@ -74,6 +70,10 @@ export default function ProfileScreen({ navigation }) {
 
   const squadsBadgeText = matchesLoading ? '—' : String(totalMySquads);
 
+  if (!user) {
+    return <SafeAreaView style={styles.safe} edges={['top']}><Header title="Your profile" section="Player" /><View style={styles.guestState}><Ionicons name="person-circle-outline" size={64} color={COLORS.primary}/><Text style={styles.guestTitle}>Sign in to manage your profile</Text><TouchableOpacity style={styles.guestButton} onPress={() => navigation.navigate('SignIn')}><Text style={styles.guestButtonText}>Sign in</Text></TouchableOpacity></View></SafeAreaView>;
+  }
+
   const MENU_ITEMS = [
     {
       id: 'squads',
@@ -113,7 +113,7 @@ export default function ProfileScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <Header />
+      <Header title="Your profile" section="Player" />
 
       <ScrollView
         style={{ flex: 1, backgroundColor: COLORS.background }}
@@ -222,7 +222,7 @@ const styles = StyleSheet.create({
   guestButtonText: { color: COLORS.textOnPrimary, fontWeight: FONT_WEIGHT.bold, fontSize: FONT_SIZE.md },
   safe: {
     flex: 1,
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.background,
   },
   profileScroll: {
     paddingHorizontal: SPACING.lg,

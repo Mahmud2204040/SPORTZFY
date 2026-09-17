@@ -9,7 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import OwnerDashboardScreen from '../screens/owner/OwnerDashboardScreen';
 import OwnerTurfScreen from '../screens/owner/OwnerTurfScreen';
 import OwnerBookingsScreen from '../screens/owner/OwnerBookingsScreen';
-import ProfileScreen from '../screens/customer/ProfileScreen';
+import OwnerProfileScreen from '../screens/owner/OwnerProfileScreen';
 import { COLORS, FONT_SIZE, FONT_WEIGHT } from '../constants/theme';
 
 const Tab = createBottomTabNavigator();
@@ -57,7 +57,7 @@ export default function OwnerTabs() {
       />
       <Tab.Screen
         name="Profile"
-        component={ProfileScreen}
+        component={OwnerProfileScreen}
         options={{ tabBarIcon: tabIcon('person-outline') }}
       />
     </Tab.Navigator>

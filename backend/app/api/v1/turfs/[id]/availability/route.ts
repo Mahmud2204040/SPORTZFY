@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getCurrentUser } from "@/lib/auth";
 import { calculateDynamicSlotPrice, calculateSlotPrice, getBangladeshHour } from "@/lib/pricing";
 
 export async function GET(
@@ -22,6 +23,12 @@ export async function GET(
         { error: { code: "NOT_FOUND", message: "Turf not found" } },
         { status: 404 }
       );
+    }
+    if (turf.status !== "APPROVED") {
+      const user = await getCurrentUser();
+      if (!user || (user.role !== "ADMIN" && user.id !== turf.ownerId)) {
+        return NextResponse.json({ error: { code: "NOT_FOUND", message: "Turf not found" } }, { status: 404 });
+      }
     }
 
     // Define target date bounds deterministically in Bangladesh Standard Time (BST / UTC+6)

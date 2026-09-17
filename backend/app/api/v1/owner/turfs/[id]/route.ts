@@ -1,14 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getCurrentUser } from "@/lib/auth";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const currentUser = await getCurrentUser();
+    if (!currentUser || (currentUser.role !== "OWNER" && currentUser.role !== "ADMIN")) {
+      return NextResponse.json({ error: { code: "FORBIDDEN", message: "Owner or administrator access required." } }, { status: 403 });
+    }
     const { id } = await params;
     const turf = await prisma.turf.findUnique({
-      where: { id },
+      where: currentUser.role === "ADMIN" ? { id } : { id, ownerId: currentUser.id },
       include: {
         images: true,
         availabilityRules: true,
@@ -32,8 +37,6 @@ export async function GET(
     );
   }
 }
-
-import { getCurrentUser } from "@/lib/auth";
 
 export async function PATCH(
   request: NextRequest,

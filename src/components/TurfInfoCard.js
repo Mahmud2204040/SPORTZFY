@@ -35,14 +35,14 @@ export default function TurfInfoCard({ turf }) {
             <Text style={styles.priceLabel}>Per hour</Text>
             <Text style={styles.price}>৳ {pricePerHour}</Text>
           </View>
-          <View style={styles.progressWrap}>
+          {totalSlots > 0 ? <View style={styles.progressWrap}>
             <Text style={styles.slotsText}>
               {bookedSlots}/{totalSlots} slots booked
             </Text>
             <View style={styles.progressBg}>
               <View style={[styles.progressFill, { width: `${percent}%` }]} />
             </View>
-          </View>
+          </View> : null}
         </View>
       </View>
     </View>
