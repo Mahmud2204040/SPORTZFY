@@ -69,7 +69,7 @@ export default function FilterModal({
       endHour: '',
       amenities: [],
       minPrice: priceRange?.min ?? 0,
-      maxPrice: priceRange?.max ?? 0,
+      maxPrice: priceRange?.max ?? null,
       minRating: 'Any',
       availability: 'Any',
     };
@@ -214,22 +214,14 @@ function PriceBox({ label, value, onChange }) {
   return (
     <View style={styles.priceBox}>
       <Text style={styles.priceLabel}>{label}</Text>
-      <Text style={styles.priceValue}>৳{value || 0}</Text>
-      {/* Two simple stepper buttons. Avoids bringing a numeric input keyboard up. */}
-      <View style={styles.stepperRow}>
-        <TouchableOpacity
-          style={styles.stepperBtn}
-          onPress={() => onChange(Math.max(0, (value || 0) - 100))}
-        >
-          <Text style={styles.stepperText}>−</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.stepperBtn}
-          onPress={() => onChange((value || 0) + 100)}
-        >
-          <Text style={styles.stepperText}>+</Text>
-        </TouchableOpacity>
-      </View>
+      <TextInput
+        accessibilityLabel={`${label} hourly price in BDT`}
+        keyboardType="numeric"
+        placeholder={label === 'Max' ? 'Any' : '0'}
+        value={value === null || value === undefined ? '' : String(value)}
+        onChangeText={text => onChange(text ? Number(text.replace(/[^0-9]/g, '')) : label === 'Max' ? null : 0)}
+        style={styles.textInput}
+      />
     </View>
   );
 }

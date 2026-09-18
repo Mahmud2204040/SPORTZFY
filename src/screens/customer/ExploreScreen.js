@@ -21,15 +21,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useBooking } from '../../context/BookingContext';
 
 import {
-  PRICE_RANGE,
-} from '../../data/mockData';
-import {
   COLORS,
   SPACING,
   RADIUS,
   FONT_SIZE,
   FONT_WEIGHT,
 } from '../../constants/theme';
+
+const PRICE_RANGE = { min: 0, max: null };
+const FILTERS_STORAGE_KEY = 'sportzfy.explore-filters.v2';
 
 const DEFAULT_FILTERS = {
   location: 'All',
@@ -63,9 +63,9 @@ export default function ExploreScreen({ navigation, route }) {
   const requestId = useRef(0);
 
   useEffect(() => {
-    AsyncStorage.getItem('sportzfy.explore-filters').then(value => { if (value) setFilters({ ...DEFAULT_FILTERS, ...JSON.parse(value) }); }).catch(() => {}).finally(() => setFiltersReady(true));
+    AsyncStorage.getItem(FILTERS_STORAGE_KEY).then(value => { if (value) setFilters({ ...DEFAULT_FILTERS, ...JSON.parse(value) }); }).catch(() => {}).finally(() => setFiltersReady(true));
   }, []);
-  useEffect(() => { if (filtersReady) AsyncStorage.setItem('sportzfy.explore-filters', JSON.stringify(filters)).catch(() => {}); }, [filters, filtersReady]);
+  useEffect(() => { if (filtersReady) AsyncStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(filters)).catch(() => {}); }, [filters, filtersReady]);
 
   const fetchTurfs = useCallback(async (cursor = null) => {
     const currentRequest = cursor ? requestId.current : ++requestId.current;
@@ -88,7 +88,7 @@ export default function ExploreScreen({ navigation, route }) {
       if (filters.availability !== 'Any') { params.availableOnly = true; params.date ||= dhakaDateOffset(); }
       if (filters.startHour !== '' || filters.endHour !== '') params.date ||= dhakaDateOffset();
       if (filters.minPrice !== PRICE_RANGE.min) params.minPrice = filters.minPrice;
-      if (filters.maxPrice !== PRICE_RANGE.max) params.maxPrice = filters.maxPrice;
+      if (filters.maxPrice !== PRICE_RANGE.max && filters.maxPrice !== '') params.maxPrice = filters.maxPrice;
       if (filters.minRating !== 'Any') params.minRating = parseFloat(filters.minRating);
       if (cursor) params.cursor = cursor;
 

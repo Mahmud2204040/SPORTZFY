@@ -29,7 +29,7 @@ export function Notice({title,body,action,onAction}: {title:string;body?:string;
  return <View style={ui.card} accessibilityLiveRegion="polite"><Text style={ui.heading}>{title}</Text>{body?<Text style={ui.muted}>{body}</Text>:null}{action&&onAction?<Button title={action} onPress={onAction} secondary/>:null}</View>;
 }
 export function Loading({label='Loading…'}:{label?:string}) { return <View accessibilityLiveRegion="polite" style={{padding:24,gap:12}}><ActivityIndicator color={COLORS.primaryDark}/><Text style={[ui.muted,{textAlign:'center'}]}>{label}</Text>{[0,1].map(i=><View key={i} style={{height:70,backgroundColor:'#E5ECE6',borderRadius:14}}/>)}</View>; }
-export function DemoNotice(){return <Text style={[ui.muted,{color:COLORS.primaryDark}]}>Demo environment · sample marketplace data · no money charged</Text>;}
+export function DemoNotice(){return <Text style={[ui.muted,{color:COLORS.primaryDark}]}>Demo booking environment · no money charged</Text>;}
 export function Sheet({visible,title,onClose,children}: {visible:boolean;title:string;onClose:()=>void;children:React.ReactNode}) {
  const [reduceMotion,setReduceMotion]=useState(true);
  useEffect(()=>{AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion); const sub=AccessibilityInfo.addEventListener('reduceMotionChanged',setReduceMotion);return()=>sub.remove();},[]);
