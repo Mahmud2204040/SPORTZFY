@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
-import { calculateDynamicSlotPrice, calculateSlotPrice, validateSlotTimes } from "@/lib/pricing";
+import { calculateDynamicSlotPrice, validateSlotTimes } from "@/lib/pricing";
 import { slotSchedule } from "@/lib/schedule";
 import { templatePricingExplanation } from "@/lib/pricing-explanation";
 

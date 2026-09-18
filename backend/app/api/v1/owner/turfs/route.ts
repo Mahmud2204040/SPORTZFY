@@ -4,7 +4,7 @@ import { getCurrentUser } from "@/lib/auth";
 import crypto from "crypto";
 import { venueImageUrls } from "@/lib/venue-images";
 
-export async function GET(_request: NextRequest) {
+export async function GET() {
   try {
     const currentUser = await getCurrentUser();
     if (!currentUser || (currentUser.role !== "OWNER" && currentUser.role !== "ADMIN")) {

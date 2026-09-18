@@ -49,6 +49,21 @@ jobs:
         run: npx tsc --noEmit -p tsconfig.json && npm run lint:api && npm test
       - name: Build Android JavaScript bundle
         run: npx expo export --platform android --output-dir .expo-ci-export
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Build Android debug APK
+        timeout-minutes: 25
+        run: |
+          npx expo prebuild --platform android --no-install
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sportzfy-android-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
       - name: Build backend
         working-directory: backend
         run: npm run build

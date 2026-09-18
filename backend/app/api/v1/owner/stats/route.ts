@@ -1,9 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { calculateDynamicSlotPrice } from "@/lib/pricing";
 
-export async function GET(_request: NextRequest) {
+export async function GET() {
   try {
     const currentUser = await getCurrentUser();
     if (!currentUser || currentUser.role !== "OWNER") {

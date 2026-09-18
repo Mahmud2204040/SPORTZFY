@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
-import { calculateDynamicSlotPrice, calculateSlotPrice, getBangladeshHour } from "@/lib/pricing";
+import { calculateDynamicSlotPrice } from "@/lib/pricing";
 import { dhakaDate, dhakaDayStart, scheduleForDate } from "@/lib/schedule";
 import { templatePricingExplanation } from "@/lib/pricing-explanation";
 
