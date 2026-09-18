@@ -58,7 +58,7 @@ export async function POST(
         await tx.moderationEvent.create({ data: { turfId: id, actorId: currentUser.id, decision: status, reason: reason || null } });
       }
       return tx.turf.findUniqueOrThrow({ where: { id }, include: { owner: { select: { id: true, name: true, email: true } } } });
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     return NextResponse.json({
       data: reviewed,
@@ -66,6 +66,7 @@ export async function POST(
     });
   } catch (error) {
     if (error instanceof Error && (error.message === "NOT_FOUND" || error.message === "CONFLICT" || error.message === "SCHEDULE_CONFLICT")) return NextResponse.json({ error: { code: error.message, message: error.message === "NOT_FOUND" ? "Venue submission not found." : error.message === "SCHEDULE_CONFLICT" ? "The proposed hours conflict with a confirmed future booking." : "This submission has already been reviewed. Refresh the queue." } }, { status: error.message === "NOT_FOUND" ? 404 : 409 });
+    if ((error as { code?: string }).code === "P2034") return NextResponse.json({ error: { code: "CONFLICT", message: "The venue changed during review. Refresh and try again." } }, { status: 409 });
     console.error("Turf review error:", error);
     return NextResponse.json(
       { error: { code: "SERVER_ERROR", message: "Failed to update venue status." } },

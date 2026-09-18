@@ -67,6 +67,15 @@ await call(`/owner/turfs/${draft.id}/submit`, { method: 'POST', token: owner, bo
 const queued = (await call('/admin/turfs', { token: admin })).data;
 assert.ok(queued.some(item => item.id === draft.id && item.status === 'PENDING_REVIEW'));
 await call(`/admin/turfs/${draft.id}/review`, { method: 'POST', token: admin, body: { status: 'APPROVED' } });
+const published = (await call(`/turfs/${draft.id}`)).data;
+assert.equal(published.images[0].url, 'https://example.com/gallery.jpg');
+const schedule = (await call(`/owner/turfs/${draft.id}/schedule`, { method: 'PATCH', token: owner, body: { rules: [{ dayOfWeek: 5, openHour: 16, closeHour: 23, hourlyRate: 1800 }] } })).data;
+assert.equal(schedule.source, 'PENDING_REVIEW');
+const scheduleReview = (await call(`/admin/turfs/${draft.id}`, { token: admin })).data;
+assert.equal(scheduleReview.pendingRevision.payload.availabilityRules[0].hourlyRate, 1800);
+await call(`/admin/turfs/${draft.id}/review`, { method: 'POST', token: admin, body: { status: 'APPROVED' } });
+const liveSchedule = (await call(`/owner/turfs/${draft.id}/schedule`, { token: owner })).data;
+assert.equal(liveSchedule.rules[0].hourlyRate, 1800);
 await call(`/owner/turfs/${draft.id}`, { method: 'PATCH', token: owner, body: { name: 'CI Smoke Venue Revision' } });
 const proposed = (await call(`/admin/turfs/${draft.id}`, { token: admin })).data;
 assert.equal(proposed.pendingRevision.payload.name, 'CI Smoke Venue Revision');

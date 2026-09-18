@@ -122,7 +122,7 @@ export default function OwnerTurfScreen({ route }) {
       const shownRules = result.proposedRules || result.rules;
       setScheduleDraft(WEEKDAYS.map((_, dayOfWeek) => {
         const rule = shownRules.find(item => item.dayOfWeek === dayOfWeek);
-        return { dayOfWeek, enabled: result.source === 'LEGACY_TIMETABLE' || !!rule, openHour: String(rule?.openHour ?? 16), closeHour: String(rule?.closeHour ?? 25), hourlyRate: String(rule?.hourlyRate ?? selected.basePricePerHour) };
+        return { dayOfWeek, enabled: result.proposedRules ? !!rule : result.source === 'LEGACY_TIMETABLE' || !!rule, openHour: String(rule?.openHour ?? 16), closeHour: String(rule?.closeHour ?? 25), hourlyRate: String(rule?.hourlyRate ?? selected.basePricePerHour) };
       }));
     } catch (e) { setScheduleError(e?.message || 'Could not load weekly hours.'); }
     finally { setScheduleLoading(false); }
