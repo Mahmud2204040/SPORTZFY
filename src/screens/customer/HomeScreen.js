@@ -8,9 +8,13 @@ import {
   RefreshControl,
   ActivityIndicator,
   TouchableOpacity,
+  Modal,
+  TextInput,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
 
 import Header from '../../components/Header';
 import SearchBar from '../../components/SearchBar';
@@ -18,12 +22,8 @@ import SectionTitle from '../../components/SectionTitle';
 import TurfCard from '../../components/TurfCard';
 import { turfsApi } from '../../api/turfs';
 
-import {
-  POPULAR_TURFS,
-  NEARBY_TURFS,
-  RECOMMENDED_TURFS,
-} from '../../data/mockData';
 import { useBooking } from '../../context/BookingContext';
+import { dhakaDateOffset } from '../../utils/dateUtils';
 import {
   COLORS,
   SPACING,
@@ -35,29 +35,48 @@ import {
 const HORIZONTAL_CARD_WIDTH = 270;
 
 export default function HomeScreen({ navigation }) {
-  const { userCity } = useBooking();
+  const { userCity, userArea, setUserCity, setUserArea } = useBooking();
   const [shelves, setShelves] = useState([]);
   const [squadsShelf, setSquadsShelf] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState('');
+  const [priceOpportunity, setPriceOpportunity] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(dhakaDateOffset());
+  const [locationModal, setLocationModal] = useState(false);
+  const [cityDraft, setCityDraft] = useState(userCity);
+  const [areaDraft, setAreaDraft] = useState(userArea);
 
   const fetchShelves = useCallback(async () => {
     try {
-      const res = await turfsApi.getShelves({
-        city: userCity || 'Chattogram',
-      });
-
-      if (res && Array.isArray(res.shelves)) {
-        setShelves(res.shelves);
-        setSquadsShelf(res.squadsShelf || null);
-      }
+      const [shelvesResult, pricesResult] = await Promise.allSettled([
+        turfsApi.getShelves({ city: userCity }),
+        turfsApi.getTurfs({ city: userCity, area: userArea || undefined, date: selectedDate, availableOnly: true }),
+      ]);
+      if (shelvesResult.status === 'fulfilled') { setShelves(shelvesResult.value.shelves); setSquadsShelf(shelvesResult.value.squadsShelf || null); }
+      else { setShelves([]); setSquadsShelf(null); setError(shelvesResult.reason?.message || 'Could not load nearby venues.'); }
+      if (pricesResult.status === 'fulfilled') {
+        const ranked = pricesResult.value.items.filter(item => item.selectedDateAvailability?.lowestAvailablePrice !== null && item.selectedDateAvailability?.lowestAvailablePrice !== undefined).sort((a, b) => a.selectedDateAvailability.lowestAvailablePrice - b.selectedDateAvailability.lowestAvailablePrice || a.id.localeCompare(b.id));
+        setPriceOpportunity(ranked[0] || null);
+      } else setPriceOpportunity(null);
     } catch (err) {
-      console.log('Error fetching discovery shelves, using local fallback:', err?.message);
+      setError(err?.message || 'Could not load discovery.');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [userCity]);
+  }, [userCity, userArea, selectedDate]);
+
+  async function useMyLocation() {
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (permission.status !== 'granted') { Alert.alert('Location not enabled', 'Your manual city and area remain selected.'); return; }
+      const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const addresses = await Location.reverseGeocodeAsync(position.coords);
+      const place = addresses[0];
+      if (place?.city || place?.region) { setUserCity(place.city || place.region); setUserArea(place.district || place.subregion || ''); }
+    } catch { Alert.alert('Location unavailable', 'Your manual city and area remain selected.'); }
+  }
 
   useEffect(() => {
     fetchShelves();
@@ -170,14 +189,17 @@ export default function HomeScreen({ navigation }) {
           />
         }
       >
+        <View style={{ paddingHorizontal: SPACING.lg, paddingTop: SPACING.md, gap: SPACING.sm }}><TouchableOpacity accessibilityRole="button" onPress={() => { setCityDraft(userCity); setAreaDraft(userArea); setLocationModal(true); }}><Text style={{ color: COLORS.textPrimary, fontSize: FONT_SIZE.md, fontWeight: FONT_WEIGHT.bold }}>{[userArea, userCity].filter(Boolean).join(', ') || 'Choose location'} · Change</Text></TouchableOpacity><TouchableOpacity accessibilityRole="button" onPress={useMyLocation}><Text style={{ color: COLORS.primaryDark }}>Use my location</Text></TouchableOpacity><View style={{ flexDirection: 'row', gap: SPACING.sm }}>{[0, 1].map(offset => <TouchableOpacity key={offset} accessibilityRole="button" accessibilityState={{ selected: selectedDate === dhakaDateOffset(offset) }} onPress={() => setSelectedDate(dhakaDateOffset(offset))}><Text style={{ color: selectedDate === dhakaDateOffset(offset) ? COLORS.primaryDark : COLORS.textSecondary }}>{offset === 0 ? 'Today' : 'Tomorrow'} · {dhakaDateOffset(offset)}</Text></TouchableOpacity>)}</View></View>
         {/* Search bar — taps directly into Explore */}
         <View style={styles.searchWrapper}>
           <SearchBar
-            placeholder="Search turfs in Chattogram..."
+            placeholder={`Search venues in ${userCity || 'your city'}...`}
             editable={false}
             onPress={() => navigation.navigate('Explore')}
           />
         </View>
+        {error ? <TouchableOpacity accessibilityRole="button" onPress={fetchShelves} style={{ padding: SPACING.lg }}><Text style={{ color: COLORS.danger }}>{error} Tap to retry.</Text></TouchableOpacity> : null}
+        {priceOpportunity ? <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('TurfDetails', { turfId: priceOpportunity.id })} style={{ marginHorizontal: SPACING.lg, padding: SPACING.lg, borderRadius: RADIUS.lg, backgroundColor: '#EAF4ED' }}><Text style={{ color: COLORS.primaryDark, fontWeight: FONT_WEIGHT.bold }}>AI Price Guide · {selectedDate}</Text><Text style={{ color: COLORS.textPrimary }}>{priceOpportunity.name} · from ৳{priceOpportunity.selectedDateAvailability.lowestAvailablePrice}/hr</Text><Text style={{ color: COLORS.textSecondary }}>Available slot quote · tap to see times</Text></TouchableOpacity> : null}
 
         {loading ? (
           <View style={styles.loadingBox}>
@@ -205,6 +227,7 @@ export default function HomeScreen({ navigation }) {
 
         <View style={{ height: SPACING.xxl }} />
       </ScrollView>
+      <Modal visible={locationModal} animationType="slide" onRequestClose={() => setLocationModal(false)}><SafeAreaView style={{ flex: 1, backgroundColor: COLORS.background }} edges={['top', 'bottom']}><View style={{ padding: SPACING.lg, gap: SPACING.md }}><Text style={{ color: COLORS.textPrimary, fontSize: FONT_SIZE.xxl, fontWeight: FONT_WEIGHT.bold }}>Choose location</Text><TextInput accessibilityLabel="City" placeholder="City" value={cityDraft} onChangeText={setCityDraft} style={{ minHeight: 48, backgroundColor: COLORS.card, borderColor: COLORS.border, borderWidth: 1, borderRadius: RADIUS.md, paddingHorizontal: SPACING.md }}/><TextInput accessibilityLabel="Area" placeholder="Area (optional)" value={areaDraft} onChangeText={setAreaDraft} style={{ minHeight: 48, backgroundColor: COLORS.card, borderColor: COLORS.border, borderWidth: 1, borderRadius: RADIUS.md, paddingHorizontal: SPACING.md }}/><TouchableOpacity accessibilityRole="button" onPress={() => { if (!cityDraft.trim()) return; setUserCity(cityDraft.trim()); setUserArea(areaDraft.trim()); setLocationModal(false); }} style={{ minHeight: 48, borderRadius: RADIUS.md, backgroundColor: COLORS.primaryDark, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#fff', fontWeight: FONT_WEIGHT.bold }}>Save location</Text></TouchableOpacity><TouchableOpacity accessibilityRole="button" onPress={() => setLocationModal(false)}><Text style={{ color: COLORS.textSecondary }}>Cancel</Text></TouchableOpacity></View></SafeAreaView></Modal>
     </SafeAreaView>
   );
 }

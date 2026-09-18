@@ -22,7 +22,7 @@ export function Button({title,onPress,loading=false,disabled=false,secondary=fal
 export function Chip({label,selected=false,onPress}: {label:string;selected?:boolean;onPress:()=>void}) {
  return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{selected}} onPress={onPress} style={{minHeight:48,paddingHorizontal:14,paddingVertical:12,borderRadius:24,borderWidth:1,borderColor:COLORS.primaryDark,backgroundColor:selected?COLORS.primaryDark:'#FFF',justifyContent:'center'}}><Text style={{fontSize:14,color:selected?'#FFF':COLORS.primaryDark,fontWeight:'600'}}>{label}</Text></Pressable>;
 }
-export function Field({label,value,onChangeText,error,...props}: {label:string;value:string;onChangeText:(v:string)=>void;error?:string} & React.ComponentProps<typeof TextInput>) {
+export function Field({label,value,onChangeText,error,...props}: {label:string;value:string;onChangeText:NonNullable<React.ComponentProps<typeof TextInput>['onChangeText']>;error?:string} & React.ComponentProps<typeof TextInput>) {
  return <View style={{gap:6}}><Text style={ui.label}>{label}</Text><TextInput {...props} accessibilityLabel={label} accessibilityHint={error} style={[ui.input,props.style]} value={value} onChangeText={onChangeText}/>{error?<Text accessibilityRole="alert" style={{color:COLORS.danger,fontSize:14}}>{error}</Text>:null}</View>;
 }
 export function Notice({title,body,action,onAction}: {title:string;body?:string;action?:string;onAction?:()=>void}) {

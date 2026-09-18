@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -16,10 +16,11 @@ import SearchBar from '../../components/SearchBar';
 import TurfCard from '../../components/TurfCard';
 import FilterModal from '../../components/FilterModal';
 import { turfsApi } from '../../api/turfs';
+import { dhakaDateOffset, nextDhakaFriday } from '../../utils/dateUtils';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useBooking } from '../../context/BookingContext';
 
 import {
-  getAllLocations,
-  getAllSports,
   PRICE_RANGE,
 } from '../../data/mockData';
 import {
@@ -33,7 +34,11 @@ import {
 const DEFAULT_FILTERS = {
   location: 'All',
   date: 'Any',
-  sport: 'All',
+  format: 'All',
+  area: '',
+  startHour: '',
+  endHour: '',
+  amenities: [],
   minPrice: PRICE_RANGE.min,
   maxPrice: PRICE_RANGE.max,
   minRating: 'Any',
@@ -41,86 +46,85 @@ const DEFAULT_FILTERS = {
 };
 
 export default function ExploreScreen({ navigation, route }) {
+  const { userCity, userArea } = useBooking();
   const initialQuery = route?.params?.query || '';
 
   const [query, setQuery] = useState(initialQuery);
-  const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const [filters, setFilters] = useState({ ...DEFAULT_FILTERS, location: userCity || 'All', area: userArea || '' });
+  const [filtersReady, setFiltersReady] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
 
   const [apiTurfs, setApiTurfs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
+  const [nextCursor, setNextCursor] = useState(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const requestId = useRef(0);
 
-  const fetchTurfs = useCallback(async () => {
+  useEffect(() => {
+    AsyncStorage.getItem('sportzfy.explore-filters').then(value => { if (value) setFilters({ ...DEFAULT_FILTERS, ...JSON.parse(value) }); }).catch(() => {}).finally(() => setFiltersReady(true));
+  }, []);
+  useEffect(() => { if (filtersReady) AsyncStorage.setItem('sportzfy.explore-filters', JSON.stringify(filters)).catch(() => {}); }, [filters, filtersReady]);
+
+  const fetchTurfs = useCallback(async (cursor = null) => {
+    const currentRequest = cursor ? requestId.current : ++requestId.current;
+    if (cursor) setLoadingMore(true);
     setError('');
     try {
       const params = {};
 
       if (query.trim()) params.q = query.trim();
       if (filters.location !== 'All') params.city = filters.location;
-      if (filters.sport !== 'All' && /^(5v5|6v6|7v7|Cricket Box)$/i.test(filters.sport)) params.format = filters.sport;
+      if (filters.area.trim()) params.area = filters.area.trim();
+      if (filters.format !== 'All') params.format = filters.format;
+      if (filters.startHour !== '') params.startHour = filters.startHour;
+      if (filters.endHour !== '') params.endHour = filters.endHour;
+      const amenityMap = { 'Floodlights': 'hasFloodlights', 'Parking': 'hasParking', 'Washroom': 'hasWashroom', 'Changing room': 'hasChangingRoom', 'Water': 'hasWater' };
+      if (filters.amenities.length) params.amenities = filters.amenities.map(item => amenityMap[item]).filter(Boolean).join(',');
+      if (filters.date === 'Today') params.date = dhakaDateOffset();
+      else if (filters.date === 'Tomorrow') params.date = dhakaDateOffset(1);
+      else if (filters.date === 'This Weekend') params.date = nextDhakaFriday();
+      if (filters.availability !== 'Any') { params.availableOnly = true; params.date ||= dhakaDateOffset(); }
+      if (filters.startHour !== '' || filters.endHour !== '') params.date ||= dhakaDateOffset();
+      if (filters.minPrice !== PRICE_RANGE.min) params.minPrice = filters.minPrice;
+      if (filters.maxPrice !== PRICE_RANGE.max) params.maxPrice = filters.maxPrice;
+      if (filters.minRating !== 'Any') params.minRating = parseFloat(filters.minRating);
+      if (cursor) params.cursor = cursor;
 
       const res = await turfsApi.getTurfs(params);
-
-      if (res && Array.isArray(res.items)) {
-        setApiTurfs(res.items);
-      }
+      if (currentRequest !== requestId.current) return;
+      setApiTurfs(current => cursor ? [...current, ...res.items] : res.items);
+      setNextCursor(res.nextCursor);
     } catch (err) {
+      if (currentRequest !== requestId.current) return;
       setError(err?.message || 'Could not load turfs.');
-      setApiTurfs([]);
+      if (!cursor) setApiTurfs([]);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (currentRequest === requestId.current) { setLoading(false); setRefreshing(false); setLoadingMore(false); }
     }
   }, [query, filters]);
 
   useEffect(() => {
-    const timer = setTimeout(fetchTurfs, 300);
-    return () => clearTimeout(timer);
-  }, [fetchTurfs]);
+    if (!filtersReady) return;
+    const timer = setTimeout(() => { setLoading(true); fetchTurfs(); }, 300);
+    return () => { clearTimeout(timer); requestId.current += 1; };
+  }, [fetchTurfs, filtersReady]);
 
   const onRefresh = () => {
     setRefreshing(true);
     fetchTurfs();
   };
 
-  function parseRating(value) {
-    if (!value || value === 'Any') return 0;
-    return parseFloat(value) || 0;
-  }
-
-  // Apply client-side filters on top of API results
-  const results = useMemo(() => {
-    const minRating = parseRating(filters.minRating);
-    const source = apiTurfs;
-
-    return source.filter((t) => {
-      // Price filter
-      const price = t.basePricePerHour ?? t.pricePerHour ?? 0;
-      if (price < filters.minPrice || price > filters.maxPrice) {
-        return false;
-      }
-
-      // Rating filter
-      if (t.rating < minRating) {
-        return false;
-      }
-
-      // Availability filter (mock for fallback data)
-      if (filters.availability === 'Available today' && t.availableSlots) {
-        const hasOpen = t.availableSlots.some((s) => s.status === 'available');
-        if (!hasOpen) return false;
-      }
-
-      return true;
-    });
-  }, [apiTurfs, filters]);
+  const results = apiTurfs;
 
   const activeFilterCount = useMemo(() => {
     let count = 0;
     if (filters.location !== 'All') count++;
-    if (filters.sport !== 'All') count++;
+    if (filters.format !== 'All') count++;
+    if (filters.area) count++;
+    if (filters.startHour || filters.endHour) count++;
+    if (filters.amenities.length) count++;
     if (filters.minRating !== 'Any') count++;
     if (filters.availability !== 'Any') count++;
     if (filters.minPrice !== PRICE_RANGE.min || filters.maxPrice !== PRICE_RANGE.max) count++;
@@ -138,7 +142,7 @@ export default function ExploreScreen({ navigation, route }) {
           <SearchBar
             value={query}
             onChangeText={setQuery}
-            onSubmitEditing={fetchTurfs}
+            onSubmitEditing={() => fetchTurfs()}
             placeholder="Search turfs..."
           />
         </View>
@@ -162,6 +166,13 @@ export default function ExploreScreen({ navigation, route }) {
           {loading ? 'Searching...' : `${results.length} ${results.length === 1 ? 'turf' : 'turfs'} found`}
         </Text>
       </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: SPACING.lg, gap: SPACING.sm, backgroundColor: COLORS.background }}>
+        {filters.location !== 'All' ? <TouchableOpacity accessibilityRole="button" onPress={() => setFilters(current => ({ ...current, location: 'All' }))}><Text style={styles.summary}>City: {filters.location} ×</Text></TouchableOpacity> : null}
+        {filters.area ? <TouchableOpacity accessibilityRole="button" onPress={() => setFilters(current => ({ ...current, area: '' }))}><Text style={styles.summary}>Area: {filters.area} ×</Text></TouchableOpacity> : null}
+        {filters.date !== 'Any' ? <TouchableOpacity accessibilityRole="button" onPress={() => setFilters(current => ({ ...current, date: 'Any' }))}><Text style={styles.summary}>{filters.date} ×</Text></TouchableOpacity> : null}
+        {filters.format !== 'All' ? <TouchableOpacity accessibilityRole="button" onPress={() => setFilters(current => ({ ...current, format: 'All' }))}><Text style={styles.summary}>{filters.format} ×</Text></TouchableOpacity> : null}
+        {filters.availability !== 'Any' ? <TouchableOpacity accessibilityRole="button" onPress={() => setFilters(current => ({ ...current, availability: 'Any' }))}><Text style={styles.summary}>Available only ×</Text></TouchableOpacity> : null}
+      </ScrollView>
 
       {/* Results */}
       <ScrollView
@@ -192,10 +203,11 @@ export default function ExploreScreen({ navigation, route }) {
         ) : results.length === 0 ? (
           <View style={styles.empty}>
             <Ionicons name="search-outline" size={48} color={COLORS.textMuted} />
-            <Text style={styles.emptyTitle}>No turfs found</Text>
+            <Text style={styles.emptyTitle}>{nextCursor ? 'No matches in this batch' : 'No turfs found'}</Text>
             <Text style={styles.emptySubtitle}>
-              Try changing your filters or search keywords.
+              {nextCursor ? 'Continue searching the remaining venues.' : 'Try changing your filters or search keywords.'}
             </Text>
+            {nextCursor ? <TouchableOpacity accessibilityRole="button" disabled={loadingMore} onPress={() => fetchTurfs(nextCursor)} style={styles.retryBtn}><Text style={styles.retryText}>{loadingMore ? 'Searching…' : 'Search more venues'}</Text></TouchableOpacity> : null}
           </View>
         ) : (
           <View style={styles.list}>
@@ -208,6 +220,7 @@ export default function ExploreScreen({ navigation, route }) {
                 }
               />
             ))}
+            {nextCursor ? <TouchableOpacity accessibilityRole="button" disabled={loadingMore} onPress={() => fetchTurfs(nextCursor)} style={styles.retryBtn}><Text style={styles.retryText}>{loadingMore ? 'Loading…' : 'Load more venues'}</Text></TouchableOpacity> : null}
           </View>
         )}
 
@@ -219,12 +232,11 @@ export default function ExploreScreen({ navigation, route }) {
         onClose={() => setShowFilters(false)}
         filters={filters}
         onApply={(next) => {
-          setFilters(next);
+          setFilters(next.date === 'Any' && (next.startHour !== '' || next.endHour !== '') ? { ...next, date: 'Today' } : next);
           setShowFilters(false);
         }}
         onReset={(cleared) => setFilters(cleared)}
-        locations={getAllLocations()}
-        sports={getAllSports()}
+        formats={['5v5', '6v6', '7v7', '11v11']}
         priceRange={PRICE_RANGE}
       />
     </SafeAreaView>

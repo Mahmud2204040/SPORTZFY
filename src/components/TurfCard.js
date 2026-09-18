@@ -1,5 +1,5 @@
 // Reusable turf card used in Home (sections/shelves) and Explore (results).
-// Compatible with both Next.js API shape and local mock objects.
+// Venue information comes from the API; missing availability is shown as unknown.
 
 import React from 'react';
 import {
@@ -15,10 +15,11 @@ import { COLORS, SPACING, RADIUS, FONT_SIZE, FONT_WEIGHT } from '../constants/th
 export default function TurfCard({ turf, onPress, style }) {
   if (!turf) return null;
 
-  const imageUri = turf.coverImage || turf.image || 'https://images.unsplash.com/photo-1551958219-acbc608c6377?w=800&q=80';
-  const price = turf.basePricePerHour ?? turf.pricePerHour ?? 1200;
-  const locationText = turf.area ? `${turf.area}, ${turf.city || 'Chattogram'}` : (turf.location || turf.address || 'Chattogram');
-  const formatTag = turf.pitchFormats ? turf.pitchFormats.split(',')[0] : (turf.sport || 'Football');
+  const imageUri = turf.coverImage || turf.image;
+  const price = turf.selectedDateAvailability?.lowestAvailablePrice ?? turf.basePricePerHour ?? turf.pricePerHour;
+  const locationText = [turf.area, turf.city].filter(Boolean).join(', ') || turf.address || 'Location unavailable';
+  const formatTag = turf.pitchFormats ? turf.pitchFormats.split(',')[0] : 'Format unavailable';
+  const availability = turf.selectedDateAvailability;
 
   return (
     <TouchableOpacity
@@ -27,7 +28,7 @@ export default function TurfCard({ turf, onPress, style }) {
       style={[styles.card, style]}
     >
       <View style={styles.imageWrap}>
-        <Image source={{ uri: imageUri }} style={styles.image} resizeMode="cover" />
+        {imageUri ? <Image source={{ uri: imageUri }} style={styles.image} resizeMode="cover" /> : <View style={styles.image} />}
         {turf.distanceKm ? (
           <View style={styles.distanceBadge}>
             <Text style={styles.distanceText}>{turf.distanceKm} km</Text>
@@ -40,7 +41,7 @@ export default function TurfCard({ turf, onPress, style }) {
           <Text style={styles.name} numberOfLines={1}>
             {turf.name}
           </Text>
-          <Rating rating={turf.rating || 4.8} reviewCount={turf.reviewCount} />
+          {Number.isFinite(turf.rating) ? <Rating rating={turf.rating} reviewCount={turf.reviewCount} /> : null}
         </View>
 
         <Text style={styles.location} numberOfLines={1}>
@@ -51,13 +52,13 @@ export default function TurfCard({ turf, onPress, style }) {
           <View style={styles.sportTag}>
             <Text style={styles.sportText}>{formatTag}</Text>
           </View>
-          <Text style={styles.price}>৳{price}<Text style={styles.priceUnit}>/hr</Text></Text>
+          <Text style={styles.price}>{price === null || price === undefined ? 'Price unavailable' : `৳${price}`}<Text style={styles.priceUnit}>{price === null || price === undefined ? '' : '/hr'}</Text></Text>
         </View>
 
         <View style={styles.footerRow}>
           <View style={styles.availableDot}>
-            <View style={styles.greenDot} />
-            <Text style={styles.availableText}>Available Today</Text>
+            {availability?.availableCount > 0 ? <View style={styles.greenDot} /> : null}
+            <Text style={styles.availableText}>{availability ? `${availability.availableCount} available on ${availability.date}` : 'Availability unknown'}</Text>
           </View>
           <TouchableOpacity
             activeOpacity={0.8}

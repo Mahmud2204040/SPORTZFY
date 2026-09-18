@@ -1,6 +1,8 @@
 node_modules/
 .expo/
 .expo*-export/
+.expo-mvp-export-status/
+.expo-ci-export/
 dist/
 npm-debug.*
 *.jks

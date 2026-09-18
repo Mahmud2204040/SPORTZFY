@@ -20,6 +20,7 @@ import {
   TouchableOpacity,
   ScrollView,
   Pressable,
+  TextInput,
 } from 'react-native';
 import PrimaryButton from './PrimaryButton';
 import {
@@ -39,8 +40,7 @@ export default function FilterModal({
   filters,
   onApply,
   onReset,
-  locations = [],
-  sports = [],
+  formats = [],
   priceRange,
 }) {
   // Local draft state — applied only when the user taps "Apply".
@@ -62,8 +62,12 @@ export default function FilterModal({
   function handleReset() {
     const cleared = {
       location: 'All',
+      area: '',
       date: 'Any',
-      sport: 'All',
+      format: 'All',
+      startHour: '',
+      endHour: '',
+      amenities: [],
       minPrice: priceRange?.min ?? 0,
       maxPrice: priceRange?.max ?? 0,
       minRating: 'Any',
@@ -96,11 +100,8 @@ export default function FilterModal({
           <ScrollView showsVerticalScrollIndicator={false}>
             {/* Location */}
             <FilterGroup label="Location">
-              <ChipRow
-                options={['All', ...locations]}
-                selected={draft.location}
-                onSelect={(v) => update('location', v)}
-              />
+              <TextInput accessibilityLabel="City" placeholder="City or All" value={draft.location === 'All' ? '' : draft.location} onChangeText={value => update('location', value || 'All')} style={styles.textInput}/>
+              <TextInput accessibilityLabel="Area" placeholder="Area (optional)" value={draft.area || ''} onChangeText={value => update('area', value)} style={styles.textInput}/>
             </FilterGroup>
 
             {/* Date */}
@@ -112,14 +113,16 @@ export default function FilterModal({
               />
             </FilterGroup>
 
-            {/* Sport */}
-            <FilterGroup label="Sport">
+            {/* Pitch format */}
+            <FilterGroup label="Pitch format">
               <ChipRow
-                options={['All', ...sports]}
-                selected={draft.sport}
-                onSelect={(v) => update('sport', v)}
+                options={['All', ...formats]}
+                selected={draft.format}
+                onSelect={(v) => update('format', v)}
               />
             </FilterGroup>
+            <FilterGroup label="Time window · Asia/Dhaka"><TextInput accessibilityLabel="Start hour" placeholder="Start hour (0–29)" keyboardType="numeric" value={draft.startHour || ''} onChangeText={value => update('startHour', value)} style={styles.textInput}/><TextInput accessibilityLabel="End hour" placeholder="End hour (1–30)" keyboardType="numeric" value={draft.endHour || ''} onChangeText={value => update('endHour', value)} style={styles.textInput}/></FilterGroup>
+            <FilterGroup label="Facilities"><ChipRow options={['Floodlights', 'Parking', 'Washroom', 'Changing room', 'Water']} selected={null} onSelect={value => update('amenities', (draft.amenities || []).includes(value) ? draft.amenities.filter(item => item !== value) : [...(draft.amenities || []), value])}/><Text style={styles.resetText}>{(draft.amenities || []).join(', ') || 'Any facilities'}</Text></FilterGroup>
 
             {/* Price */}
             <FilterGroup label="Price (BDT / hour)">
@@ -232,6 +235,7 @@ function PriceBox({ label, value, onChange }) {
 }
 
 const styles = StyleSheet.create({
+  textInput: { minHeight: 48, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, backgroundColor: COLORS.card, color: COLORS.textPrimary, paddingHorizontal: SPACING.md, marginBottom: SPACING.sm },
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.4)',

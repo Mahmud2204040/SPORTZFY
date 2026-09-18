@@ -17,12 +17,13 @@ export async function GET(_request: NextRequest) {
     const totalUsers = await prisma.user.count();
     const totalMatchPosts = await prisma.matchPost.count();
 
-    const allBookings = await prisma.booking.findMany({
+    const bookingTotals = await prisma.booking.aggregate({
       where: { status: "CONFIRMED" },
-      select: { totalAmount: true, createdAt: true },
+      _sum: { totalAmount: true },
+      _count: { _all: true },
     });
 
-    const totalGMV = allBookings.reduce((sum, b) => sum + b.totalAmount, 0);
+    const totalGMV = bookingTotals._sum.totalAmount ?? 0;
     const platformCommission = Math.round(totalGMV * 0.05); // 5% platform take-rate
 
     // Recent system activities
@@ -40,7 +41,7 @@ export async function GET(_request: NextRequest) {
         stats: {
           totalGMV,
           platformCommission,
-          totalBookings: allBookings.length,
+          totalBookings: bookingTotals._count._all,
           totalTurfs,
           approvedTurfs,
           pendingTurfs,

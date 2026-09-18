@@ -4,19 +4,15 @@ import { verifyEdgeSession } from "@/lib/edge-auth";
 
 function getCorsHeaders(request: NextRequest) {
   const origin = request.headers.get("origin");
-
-  // If origin is missing, this is not a browser CORS scenario.
-  // We still set an empty value to avoid throwing; the browser won't validate
-  // when it isn't part of a cross-origin request.
-  const allowOrigin = origin || "";
-
+  const allowed = (process.env.CORS_ALLOWED_ORIGINS || "").split(",").map(value => value.trim()).filter(Boolean);
+  if (process.env.NODE_ENV !== "production") allowed.push("http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:8081");
+  if (!origin || !allowed.includes(origin)) return { Vary: "Origin" };
   return {
-    "Access-Control-Allow-Origin": allowOrigin,
+    "Access-Control-Allow-Origin": origin,
     Vary: "Origin",
     "Access-Control-Allow-Credentials": "true",
     "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, Cookie",
-    "Access-Control-Expose-Headers": "set-cookie",
     "Access-Control-Max-Age": "86400",
   } as Record<string, string>;
 }
@@ -35,7 +31,8 @@ export async function middleware(request: NextRequest) {
 
   // Always answer CORS preflight requests.
   if (request.method === "OPTIONS") {
-    return withCors(NextResponse.next(), request);
+    const cors = getCorsHeaders(request);
+    return withCors(new NextResponse(null, { status: "Access-Control-Allow-Origin" in cors ? 204 : 403 }), request);
   }
 
   // For any non-admin/non-owner routes (including /api/v1/*), we only attach

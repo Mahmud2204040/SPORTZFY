@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { calculateDynamicSlotPrice, calculateSlotPrice, getBangladeshHour } from "@/lib/pricing";
+import { dhakaDate, dhakaDayStart, scheduleForDate } from "@/lib/schedule";
+import { templatePricingExplanation } from "@/lib/pricing-explanation";
 
 export async function GET(
   request: NextRequest,
@@ -10,7 +12,10 @@ export async function GET(
   try {
     const { id } = await params;
     const { searchParams } = new URL(request.url);
-    const dateParam = searchParams.get("date") || new Date().toISOString().split("T")[0];
+    const dateParam = searchParams.get("date") || dhakaDate(new Date());
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateParam) || Number.isNaN(dhakaDayStart(dateParam).getTime()) || dhakaDate(dhakaDayStart(dateParam)) !== dateParam) {
+      return NextResponse.json({ error: { code: "BAD_REQUEST", message: "Invalid date." } }, { status: 400 });
+    }
 
     const turf = await prisma.turf.findFirst({
       where: {
@@ -32,15 +37,10 @@ export async function GET(
     }
 
     // Define target date bounds deterministically in Bangladesh Standard Time (BST / UTC+6)
-    const [yearStr, monthStr, dayStr] = dateParam.split("-");
-    const year = parseInt(yearStr, 10);
-    const month = parseInt(monthStr, 10) - 1; // 0-indexed
-    const day = parseInt(dayStr, 10);
-
-    // Midnight 00:00 BST on target day is 18:00 UTC of previous day (h - 6)
-    const dayStart = new Date(Date.UTC(year, month, day, 0 - 6, 0, 0));
-    // Day end extends to 3:00 AM BST next day (21:00 UTC of target day)
-    const dayEnd = new Date(Date.UTC(year, month, day, 27 - 6, 0, 0));
+    const dayStart = dhakaDayStart(dateParam);
+    const dayEnd = new Date(dayStart.getTime() + 30 * 60 * 60 * 1000);
+    const rules = await prisma.availabilityRule.findMany({ where: { turfId: turf.id } });
+    const schedule = scheduleForDate(dateParam, rules);
 
     // Fetch existing bookings overlapping with target day range
     const bookings = await prisma.booking.findMany({
@@ -88,12 +88,12 @@ export async function GET(
     // Build standard evening/night timetable: 4 PM (16:00) through 12 AM (24:00)
     // 16:00, 17:00, 18:00, 19:00, 20:00, 21:00, 22:00, 23:00, 24:00 (00:00)
     const slots = [];
-    const hours = [16, 17, 18, 19, 20, 21, 22, 23, 24];
+    const hours = schedule.hours;
 
     for (const h of hours) {
       // In BST (UTC+6), UTC hour = h - 6
-      const slotStart = new Date(Date.UTC(year, month, day, h - 6, 0, 0));
-      const slotEnd = new Date(Date.UTC(year, month, day, h + 1 - 6, 0, 0));
+      const slotStart = new Date(dayStart.getTime() + h * 60 * 60 * 1000);
+      const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000);
 
       // Check collisions
       const isBooked = bookings.some(
@@ -120,8 +120,9 @@ export async function GET(
       }
 
       // Calculate dynamic price using native Random Forest in-process engine with live density
-      const dynamicQuote = calculateDynamicSlotPrice(turf.basePricePerHour, slotStart, {
-        venueRating: turf.rating || 4.7,
+      const hourlyRate = schedule.rateByHour.get(h) ?? turf.basePricePerHour;
+      const dynamicQuote = calculateDynamicSlotPrice(hourlyRate, slotStart, {
+        venueRating: turf.rating,
         historicalDensity,
       });
 
@@ -144,9 +145,14 @@ export async function GET(
         demandScore: dynamicQuote.demandScore,
         multiplier: dynamicQuote.multiplier,
         badgeText: dynamicQuote.badgeText,
-        pricingExplanation: dynamicQuote.explanation,
+        pricingExplanation: templatePricingExplanation.explain({ basePrice: hourlyRate, quotedPrice: dynamicQuote.finalPrice, hourDhaka: h % 24, recentConfirmedBookings: recentBookingsCount, sampleData: recentBookingsCount < 5 }),
+        pricingFactors: { hourDhaka: h % 24, recentConfirmedBookings: recentBookingsCount, venueRating: turf.rating },
+        modelSource: "LOCAL_RANDOM_FOREST",
+        sampleData: recentBookingsCount < 5,
+        quoteTime: now.toISOString(),
+        quoteExpiresAt: new Date(now.getTime() + 30000).toISOString(),
         price: dynamicQuote.finalPrice,
-        basePrice: turf.basePricePerHour,
+        basePrice: hourlyRate,
         status, // "AVAILABLE" | "HELD" | "BOOKED" | "BLOCKED"
         holdExpiresAt: activeHold ? activeHold.expiresAt.toISOString() : null,
       });
@@ -157,6 +163,7 @@ export async function GET(
         turfId: turf.id,
         turfName: turf.name,
         date: dateParam,
+        scheduleSource: schedule.fallback ? "LEGACY_TIMETABLE" : "OWNER_RULES",
         slots,
       },
     });

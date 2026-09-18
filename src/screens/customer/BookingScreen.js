@@ -6,6 +6,7 @@ import {
   ScrollView,
   Image,
   Alert,
+  AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,7 +21,7 @@ import { COLORS, SPACING, RADIUS, FONT_SIZE, FONT_WEIGHT } from '../../constants
 import { formatCountdown } from '../../utils/dateUtils';
 
 export default function BookingScreen({ route, navigation }) {
-  const { turfId, turf, date, dateISO, slot } = route.params || {};
+  const { turfId, turf, date, slot } = route.params || {};
 
   // Hold state
   const [holdId, setHoldId] = useState(null);
@@ -36,16 +37,21 @@ export default function BookingScreen({ route, navigation }) {
   // Countdown
   const [remaining, setRemaining] = useState(0);
   const timerRef = useRef(null);
+  const serverOffset = useRef(0);
+  const [checkoutState, setCheckoutState] = useState('reserving');
 
   // Success modal
   const [success, setSuccess] = useState(false);
   const [bookingRef, setBookingRef] = useState(null);
-  const [bookingQR, setBookingQR] = useState(null);
+  const [confirmedBookingId, setConfirmedBookingId] = useState(null);
+  const [quoteChanged, setQuoteChanged] = useState(false);
+  const [quoteAccepted, setQuoteAccepted] = useState(false);
 
   // Acquire hold on mount
   const acquireHold = useCallback(async () => {
     if (!turfId || !slot) return;
     setHoldLoading(true);
+    setCheckoutState('reserving');
     setHoldError('');
     try {
       const res = await holdsApi.createHold({
@@ -55,13 +61,18 @@ export default function BookingScreen({ route, navigation }) {
       });
       if (res) {
         setHoldId(res.id);
+        serverOffset.current = res.serverTime ? new Date(res.serverTime).getTime() - Date.now() : 0;
         setHoldPrice(res.price);
         setHoldExpiresAt(new Date(res.expiresAt).getTime());
+        setQuoteChanged(Number.isFinite(slot.price) && Number(slot.price) !== Number(res.price));
+        setQuoteAccepted(false);
+        setCheckoutState('reserved');
       }
     } catch (err) {
       console.log('Hold error:', err);
       const msg = err?.message || 'Could not reserve the slot. It may be taken.';
       setHoldError(msg);
+      setCheckoutState('error');
       Alert.alert('Slot Unavailable', msg, [
         { text: 'Go Back', onPress: () => navigation.goBack() },
       ]);
@@ -82,9 +93,10 @@ export default function BookingScreen({ route, navigation }) {
     if (!holdExpiresAt || success) return;
 
     function tick() {
-      const diff = holdExpiresAt - Date.now();
+      const diff = holdExpiresAt - (Date.now() + serverOffset.current);
       setRemaining(diff);
       if (diff <= 0) {
+        setCheckoutState('expired');
         clearInterval(timerRef.current);
         Alert.alert(
           'Hold Expired',
@@ -98,6 +110,16 @@ export default function BookingScreen({ route, navigation }) {
     timerRef.current = setInterval(tick, 1000);
     return () => clearInterval(timerRef.current);
   }, [holdExpiresAt, navigation, success]);
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active' && holdExpiresAt && !success) {
+        const diff = holdExpiresAt - (Date.now() + serverOffset.current);
+        setRemaining(diff);
+        if (diff <= 0) setCheckoutState('expired');
+      }
+    });
+    return () => subscription.remove();
+  }, [holdExpiresAt, success]);
 
   // Guard for missing params
   if (!turf || !date || !slot) {
@@ -110,16 +132,25 @@ export default function BookingScreen({ route, navigation }) {
     );
   }
 
-  const imageUri = turf.coverImage || (turf.images?.[0]?.url) || 'https://images.unsplash.com/photo-1551958219-acbc608c6377?w=800&q=80';
-  const locationText = turf.area ? `${turf.area}, ${turf.city || 'Chattogram'}` : (turf.address || 'Chattogram');
+  const imageUri = turf.coverImage || (turf.images?.[0]?.url);
+  const locationText = [turf.area, turf.city].filter(Boolean).join(', ') || turf.address || 'Location unavailable';
   const timeLabel = slot.timeLabel || `${slot.startTime} – ${slot.endTime}`;
-  const price = holdPrice || slot.price || turf.basePricePerHour || 0;
+  const price = holdPrice ?? slot.price ?? turf.basePricePerHour ?? 0;
   const isUrgent = remaining > 0 && remaining < 60000; // < 1 min
   const progress = holdExpiresAt ? Math.max(0, remaining / 300000) : 0; // 300s = 5 min
 
   async function handleConfirm() {
     if (!holdId) return;
+    if (processing || checkoutState === 'expired' || checkoutState === 'confirmed') return;
+    if (quoteChanged && !quoteAccepted) {
+      Alert.alert('Price changed', `The latest slot quote is ৳${holdPrice}, compared with ৳${slot.price} shown earlier.`, [
+        { text: 'Go back', style: 'cancel' },
+        { text: 'Accept new quote', onPress: () => setQuoteAccepted(true) },
+      ]);
+      return;
+    }
     setProcessing(true);
+    setCheckoutState('confirming');
     try {
       const res = await bookingsApi.confirmBooking({
         holdId,
@@ -127,13 +158,25 @@ export default function BookingScreen({ route, navigation }) {
       });
       if (res) {
         setBookingRef(res.referenceCode);
-        setBookingQR(null);
+        setConfirmedBookingId(res.id);
         setSuccess(true);
+        setCheckoutState('confirmed');
       }
     } catch (err) {
       console.log('Booking error:', err);
-      const msg = err?.message || 'Payment failed. Please try again.';
-      Alert.alert('Payment Failed', msg);
+      try {
+        const state = await holdsApi.getHold(holdId);
+        if (state.status === 'CONSUMED' && state.booking?.id) {
+          const confirmed = await bookingsApi.getBooking(state.booking.id);
+          setBookingRef(confirmed.referenceCode);
+          setConfirmedBookingId(confirmed.id);
+          setSuccess(true);
+          setCheckoutState('confirmed');
+          return;
+        }
+      } catch { /* Keep the user on checkout for a safe manual retry. */ }
+      setCheckoutState('error');
+      Alert.alert('Confirmation unclear', err?.message || 'Could not confirm this demo booking. Check the hold and retry.');
     } finally {
       setProcessing(false);
     }
@@ -141,7 +184,7 @@ export default function BookingScreen({ route, navigation }) {
 
   function handleViewBookings() {
     setSuccess(false);
-    navigation.navigate('MainTabs', { screen: 'Bookings' });
+    navigation.navigate('BookingDetail', { bookingId: confirmedBookingId });
   }
 
   function handleDone() {
@@ -197,7 +240,7 @@ export default function BookingScreen({ route, navigation }) {
           <Text style={styles.cardTitle}>Booking Summary</Text>
 
           <View style={styles.turfRow}>
-            <Image source={{ uri: imageUri }} style={styles.thumb} />
+            {imageUri ? <Image source={{ uri: imageUri }} style={styles.thumb} /> : <View style={styles.thumb} />}
             <View style={{ flex: 1 }}>
               <Text style={styles.turfName} numberOfLines={1}>{turf.name}</Text>
               <Text style={styles.turfLocation} numberOfLines={1}>📍 {locationText}</Text>
@@ -221,6 +264,7 @@ export default function BookingScreen({ route, navigation }) {
         {/* Price breakdown */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Price Details</Text>
+          {quoteChanged ? <Text accessibilityRole="alert" style={styles.demoLabel}>The held quote changed from ৳{slot.price} to ৳{holdPrice}. Confirm the new quote before booking.</Text> : null}
           <Row icon="pricetag-outline" label="Slot Price" value={`৳${price}`} />
           {slot.basePrice && slot.basePrice !== price && (
             <Row icon="information-circle-outline" label="Base Price" value={`৳${slot.basePrice}`} />
@@ -261,10 +305,10 @@ export default function BookingScreen({ route, navigation }) {
                 ? 'Reserving...'
                 : processing
                 ? 'Processing...'
-                : `Confirm & Pay ৳${price}`
+                : `Confirm demo booking · ৳${price}`
             }
             loading={holdLoading || processing}
-            disabled={!!holdError || holdLoading || remaining <= 0}
+            disabled={!!holdError || holdLoading || processing || remaining <= 0 || checkoutState === 'confirmed'}
             onPress={handleConfirm}
           />
         </View>
@@ -273,12 +317,11 @@ export default function BookingScreen({ route, navigation }) {
       <SuccessModal
         visible={success}
         bookingId={bookingRef}
-        qrCode={bookingQR}
         turfName={turf.name}
         date={date}
         time={timeLabel}
         price={price}
-        onViewBookings={handleViewBookings}
+        onViewBooking={handleViewBookings}
         onDone={handleDone}
       />
     </SafeAreaView>

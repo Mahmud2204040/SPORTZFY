@@ -1,5 +1,5 @@
 // Success modal after booking confirmation.
-// Shows reference code, optional QR pass, and action buttons.
+// Shows the demo booking reference and actions.
 
 import React from 'react';
 import {
@@ -9,7 +9,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   Pressable,
-  Image,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import PrimaryButton from './PrimaryButton';
@@ -24,12 +24,11 @@ import {
 export default function SuccessModal({
   visible,
   bookingId,
-  qrCode,
   turfName,
   date,
   time,
   price,
-  onViewBookings,
+  onViewBooking,
   onDone,
 }) {
   return (
@@ -41,6 +40,7 @@ export default function SuccessModal({
     >
       <Pressable style={styles.backdrop} onPress={onDone}>
         <Pressable style={styles.sheet} onPress={() => {}}>
+          <ScrollView contentContainerStyle={styles.sheetContent}>
           {/* Green check icon */}
           <View style={styles.iconCircle}>
             <Ionicons name="checkmark" size={36} color={COLORS.textOnPrimary} />
@@ -51,37 +51,27 @@ export default function SuccessModal({
             Your turf slot has been booked successfully.
           </Text>
 
-          {/* QR Code Pass */}
-          {qrCode ? (
-            <View style={styles.qrCard}>
-              <Image
-                source={{ uri: qrCode }}
-                style={styles.qrImage}
-                resizeMode="contain"
-              />
-              <Text style={styles.qrHint}>Show this QR at the venue</Text>
-            </View>
-          ) : null}
+          <Text style={styles.subtitle}>Demo payment — no money charged.</Text>
 
           {/* Summary card */}
           <View style={styles.summaryCard}>
-            <SummaryRow label="Reference" value={bookingId || 'SPZ-XXXX'} highlight />
+            <SummaryRow label="Reference" value={bookingId || 'Unavailable'} highlight />
             <View style={styles.divider} />
             <SummaryRow label="Turf" value={turfName} />
             <View style={styles.divider} />
             <SummaryRow label="Date" value={date} />
             <View style={styles.divider} />
             <SummaryRow label="Time" value={time} />
-            {price != null && (
+            {price !== null && price !== undefined && (
               <>
                 <View style={styles.divider} />
-                <SummaryRow label="Total Paid" value={`৳${price}`} highlight />
+                <SummaryRow label="Demo booking value" value={`৳${price}`} highlight />
               </>
             )}
           </View>
 
           <View style={styles.actions}>
-            <PrimaryButton title="View My Bookings" onPress={onViewBookings} />
+            <PrimaryButton title="View booking details" onPress={onViewBooking} />
             <TouchableOpacity
               style={styles.secondaryBtn}
               activeOpacity={0.7}
@@ -90,6 +80,7 @@ export default function SuccessModal({
               <Text style={styles.secondaryText}>Done</Text>
             </TouchableOpacity>
           </View>
+          </ScrollView>
         </Pressable>
       </Pressable>
     </Modal>
@@ -103,6 +94,7 @@ function SummaryRow({ label, value, highlight }) {
       <Text
         style={[styles.summaryValue, highlight && styles.summaryValueHighlight]}
         numberOfLines={1}
+        selectable={label === 'Reference'}
       >
         {value}
       </Text>
@@ -111,6 +103,7 @@ function SummaryRow({ label, value, highlight }) {
 }
 
 const styles = StyleSheet.create({
+  sheetContent: { alignItems: 'center', paddingBottom: SPACING.md },
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.55)',

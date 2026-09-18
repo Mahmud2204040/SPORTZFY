@@ -15,11 +15,12 @@ export async function GET(_request: NextRequest) {
       include: {
         owner: { select: { id: true, name: true, email: true, phone: true } },
         bookings: { select: { id: true } },
+        revisions: { where: { status: "PENDING_REVIEW" }, orderBy: { submittedAt: "desc" }, take: 1 },
       },
       orderBy: { createdAt: "desc" },
     });
 
-    return NextResponse.json({ data: turfs });
+    return NextResponse.json({ data: turfs.map(({ revisions, ...turf }) => ({ ...turf, liveStatus: turf.status, status: revisions.length ? "PENDING_REVIEW" : turf.status, pendingRevision: revisions[0] || null })) });
   } catch (error) {
     console.error("Error fetching admin turfs:", error);
     return NextResponse.json(

@@ -3,6 +3,8 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { calculateDynamicSlotPrice, calculateSlotPrice, validateSlotTimes } from "@/lib/pricing";
+import { slotSchedule } from "@/lib/schedule";
+import { templatePricingExplanation } from "@/lib/pricing-explanation";
 
 export async function POST(request: NextRequest) {
   try {
@@ -31,7 +33,7 @@ export async function POST(request: NextRequest) {
 
     // Require authenticated session
     const currentUser = await getCurrentUser();
-    let player = currentUser
+    const player = currentUser
       ? await prisma.user.findUnique({ where: { id: currentUser.id } })
       : null;
 
@@ -64,6 +66,13 @@ export async function POST(request: NextRequest) {
         throw new Error("TURF_NOT_AVAILABLE");
       }
 
+      const rules = await tx.availabilityRule.findMany({ where: { turfId } });
+      const schedule = slotSchedule(slotStart, slotEnd, rules);
+      if (!schedule) {
+        throw new Error("SLOT_OUTSIDE_SCHEDULE");
+      }
+      const hourlyRate = schedule.hourlyRate ?? turf.basePricePerHour;
+
       // Compute 4-week rolling booking density to feed the ML model
       const fourWeeksAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000);
       const recentBookingsCount = await tx.booking.count({
@@ -76,8 +85,8 @@ export async function POST(request: NextRequest) {
       const historicalDensity = Math.min(0.95, Math.max(0.15, Math.round((recentBookingsCount / 252) * 100) / 100));
 
       // Compute tamper-proof authentic price server-side using native Random Forest model
-      const dynamicQuote = calculateDynamicSlotPrice(turf.basePricePerHour, slotStart, {
-        venueRating: turf.rating || 4.7,
+      const dynamicQuote = calculateDynamicSlotPrice(hourlyRate, slotStart, {
+        venueRating: turf.rating,
         historicalDensity,
         endTime: slotEnd,
       });
@@ -158,19 +167,20 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      return newHold;
+      return { ...newHold, pricingExplanation: templatePricingExplanation.explain({ basePrice: hourlyRate, quotedPrice: authenticPrice, hourDhaka: (slotStart.getUTCHours() + 6) % 24, recentConfirmedBookings: recentBookingsCount, sampleData: recentBookingsCount < 5 }), modelSource: "LOCAL_RANDOM_FOREST", sampleData: recentBookingsCount < 5, quoteTime: now.toISOString() };
     }, {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     });
 
     return NextResponse.json(
       {
-        data: hold,
-        message: "Slot hold acquired successfully. You have 5 minutes to complete payment.",
+        data: { ...hold, serverTime: new Date().toISOString(), paymentMode: "DEMO" },
+        message: "Slot hold acquired successfully. Demo payment: no money will be charged.",
       },
       { status: 201 }
     );
-  } catch (error: any) {
+  } catch (caught: unknown) {
+    const error = caught as { code?: string; message?: string };
     // Catch PostgreSQL serialization conflicts under heavy concurrent requests
     if (error.code === "P2034" || (error.message && error.message.includes("could not serialize access"))) {
       return NextResponse.json(
@@ -196,6 +206,10 @@ export async function POST(request: NextRequest) {
         { error: { code: "TURF_NOT_AVAILABLE", message: "This turf is currently not available for reservations." } },
         { status: 400 }
       );
+    }
+
+    if (error.message === "SLOT_OUTSIDE_SCHEDULE") {
+      return NextResponse.json({ error: { code: "SLOT_OUTSIDE_SCHEDULE", message: "This slot is outside the venue's booking hours." } }, { status: 409 });
     }
 
     if (error.message === "SLOT_ALREADY_BOOKED") {

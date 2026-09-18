@@ -26,11 +26,11 @@ export async function GET(_request: NextRequest) {
           },
         },
         hostUser: {
-          select: { id: true, name: true, phone: true },
+          select: { id: true, name: true },
         },
         joinRequests: {
           include: {
-            user: { select: { id: true, name: true, phone: true } },
+            user: { select: { id: true, name: true } },
           },
           orderBy: { createdAt: "desc" },
         },
@@ -54,7 +54,7 @@ export async function GET(_request: NextRequest) {
               },
             },
             hostUser: {
-              select: { id: true, name: true, phone: true },
+              select: { id: true, name: true },
             },
             joinRequests: {
               where: { status: "ACCEPTED" },

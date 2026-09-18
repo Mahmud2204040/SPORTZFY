@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,8 +8,11 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
+  AppState,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 
 import Rating from '../../components/Rating';
@@ -28,26 +31,31 @@ import {
 
 export default function TurfDetailsScreen({ route, navigation }) {
   const { turfId } = route.params || {};
-  const { user } = useAuth();
+  const { user, setPendingDestination } = useAuth();
 
   const [turf, setTurf] = useState(null);
   const [slots, setSlots] = useState([]);
   const [loading, setLoading] = useState(true);
   const [slotsLoading, setSlotsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [detailError, setDetailError] = useState('');
+  const [slotsError, setSlotsError] = useState('');
+  const [priceSheet, setPriceSheet] = useState(false);
+  const slotRequest = useRef(0);
 
-  const dates = useMemo(() => getUpcomingDates(7), []);
+  const dates = useMemo(() => getUpcomingDates(14), []);
   const [selectedDateIndex, setSelectedDateIndex] = useState(0);
   const [selectedSlot, setSelectedSlot] = useState(null);
 
   // Fetch turf details
   const fetchTurf = useCallback(async () => {
     if (!turfId) return;
+    setDetailError('');
     try {
       const res = await turfsApi.getTurfById(turfId);
       if (res) setTurf(res);
     } catch (err) {
-      console.log('Error fetching turf detail:', err?.message);
+      setDetailError(err?.message || 'Could not load venue details.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -57,31 +65,35 @@ export default function TurfDetailsScreen({ route, navigation }) {
   // Fetch slot availability for the selected date
   const fetchSlots = useCallback(async () => {
     if (!turfId) return;
-    setSlotsLoading(true);
-    setSelectedSlot(null);
+    const request = ++slotRequest.current;
+    if (slots.length === 0) setSlotsLoading(true);
+    setSlotsError('');
     try {
       const dateStr = formatDateISO(dates[selectedDateIndex]);
       const res = await turfsApi.getAvailability(turfId, dateStr);
+      if (request !== slotRequest.current) return;
       if (res?.slots) {
         setSlots(res.slots);
+        setSelectedSlot(current => current ? res.slots.find(slot => slot.slotId === current.slotId && slot.status === 'AVAILABLE') || null : null);
       } else {
         setSlots([]);
       }
     } catch (err) {
-      console.log('Error fetching availability:', err?.message);
-      setSlots([]);
+      if (request !== slotRequest.current) return;
+      setSlotsError(err?.message || 'Could not load live availability.');
     } finally {
-      setSlotsLoading(false);
+      if (request === slotRequest.current) setSlotsLoading(false);
     }
   }, [turfId, selectedDateIndex, dates]);
 
-  useEffect(() => {
-    fetchTurf();
-  }, [fetchTurf]);
-
-  useEffect(() => {
+  useEffect(() => { setSelectedSlot(null); setSlots([]); }, [selectedDateIndex]);
+  useFocusEffect(useCallback(() => { fetchTurf(); }, [fetchTurf]));
+  useFocusEffect(useCallback(() => {
     fetchSlots();
-  }, [fetchSlots]);
+    const timer = setInterval(() => { if (AppState.currentState === 'active') fetchSlots(); }, 30000);
+    const subscription = AppState.addEventListener('change', state => { if (state === 'active') fetchSlots(); });
+    return () => { clearInterval(timer); subscription.remove(); slotRequest.current += 1; };
+  }, [fetchSlots]));
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -107,31 +119,35 @@ export default function TurfDetailsScreen({ route, navigation }) {
         <View style={styles.center}>
           <Ionicons name="alert-circle-outline" size={48} color={COLORS.textMuted} />
           <Text style={styles.errorText}>Turf not found.</Text>
+          {detailError ? <Text style={styles.errorText}>{detailError}</Text> : null}
+          <TouchableOpacity accessibilityRole="button" onPress={fetchTurf}><Text style={styles.errorText}>Retry</Text></TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
 
   const selectedDate = dates[selectedDateIndex];
-  const imageUri = turf.coverImage || (turf.images?.[0]?.url) || 'https://images.unsplash.com/photo-1551958219-acbc608c6377?w=800&q=80';
-  const locationText = turf.area ? `${turf.area}, ${turf.city || 'Chattogram'}` : (turf.address || 'Chattogram');
-  const formatTag = Array.isArray(turf.pitchFormats) ? turf.pitchFormats[0] : (turf.pitchFormats || 'Football');
-  const amenities = Array.isArray(turf.amenities) ? turf.amenities : [];
+  const imageUri = turf.coverImage || (turf.images?.[0]?.url);
+  const locationText = [turf.area, turf.city].filter(Boolean).join(', ') || turf.address || 'Location unavailable';
+  const formatTag = turf.pitchFormats || 'Format unavailable';
+  const amenities = [['Floodlights', turf.hasFloodlights], ['Parking', turf.hasParking], ['Washroom', turf.hasWashroom], ['Changing room', turf.hasChangingRoom], ['Water', turf.hasWater]].filter(([, present]) => present).map(([name]) => name);
 
   // Slot summary stats
   const availableCount = slots.filter((s) => s.status === 'AVAILABLE').length;
   const totalSlots = slots.length;
+  const cheaperSlots = selectedSlot ? slots.filter(slot => slot.status === 'AVAILABLE' && slot.price < selectedSlot.price).sort((a, b) => a.price - b.price || a.startTime.localeCompare(b.startTime)).slice(0, 3) : [];
 
   function handleBookNow() {
     if (!selectedSlot) return;
-    if (!user) { navigation.navigate('SignIn', { redirect: 'Booking', turfId, slot: selectedSlot }); return; }
-    navigation.navigate('Booking', {
+    const destination = {
       turfId: turf.id,
       turf,
       date: formatLongDate(selectedDate),
       dateISO: formatDateISO(selectedDate),
       slot: selectedSlot,
-    });
+    };
+    if (!user) { setPendingDestination({ name: 'Booking', params: destination }); navigation.navigate('SignIn'); return; }
+    navigation.navigate('Booking', destination);
   }
 
   return (
@@ -150,14 +166,14 @@ export default function TurfDetailsScreen({ route, navigation }) {
         }
       >
         {/* Hero image */}
-        <Image source={{ uri: imageUri }} style={styles.hero} />
+        {imageUri ? <Image source={{ uri: imageUri }} style={styles.hero} /> : <View style={styles.hero} />}
 
         {/* Top section */}
         <View style={styles.section}>
           <Text style={styles.name}>{turf.name}</Text>
 
           <View style={styles.metaRow}>
-            <Rating rating={turf.rating || 0} reviewCount={turf.totalReviews || turf.reviewCount || 0} />
+            {Number.isFinite(turf.rating) ? <Rating rating={turf.rating} reviewCount={turf.totalReviews || turf.reviewCount || 0} /> : null}
             <Text style={styles.price}>৳{turf.basePricePerHour}<Text style={styles.priceUnit}>/hr</Text></Text>
           </View>
 
@@ -170,6 +186,13 @@ export default function TurfDetailsScreen({ route, navigation }) {
             <Text style={styles.sportText}>{formatTag}</Text>
           </View>
         </View>
+
+        {turf.images?.length > 0 ? <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Venue gallery</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: SPACING.sm }}>
+            {turf.images.map((photo, index) => <Image key={photo.id || photo.url} accessibilityLabel={photo.caption || `Venue photo ${index + 1}`} source={{ uri: photo.url }} style={styles.galleryImage}/>)}
+          </ScrollView>
+        </View> : null}
 
         {/* Facilities */}
         {amenities.length > 0 && (
@@ -203,7 +226,7 @@ export default function TurfDetailsScreen({ route, navigation }) {
                 </Text>
               </View>
 
-              {selectedSlot.basePrice != null && selectedSlot.price != null && (
+              {selectedSlot.basePrice !== null && selectedSlot.basePrice !== undefined && selectedSlot.price !== null && selectedSlot.price !== undefined && (
                 <View style={styles.pricingInfoRow}>
                   <Ionicons name="wallet-outline" size={16} color={COLORS.primary} />
                   <Text style={styles.pricingInfoText}>
@@ -211,6 +234,8 @@ export default function TurfDetailsScreen({ route, navigation }) {
                   </Text>
                 </View>
               )}
+              <TouchableOpacity accessibilityRole="button" onPress={() => setPriceSheet(true)}><Text style={styles.pricingInfoText}>Why this price? View AI pricing details</Text></TouchableOpacity>
+              {cheaperSlots.length ? <View><Text style={styles.pricingInfoText}>Cheaper slots at this venue</Text>{cheaperSlots.map(slot => <TouchableOpacity key={slot.slotId} accessibilityRole="button" onPress={() => setSelectedSlot(slot)}><Text style={styles.pricingInfoText}>{slot.timeLabel} · ৳{slot.price}</Text></TouchableOpacity>)}</View> : null}
             </>
           ) : (
             <>
@@ -273,7 +298,7 @@ export default function TurfDetailsScreen({ route, navigation }) {
               <ActivityIndicator size="small" color={COLORS.primary} />
               <Text style={styles.slotsLoadingText}>Fetching live prices...</Text>
             </View>
-          ) : slots.length === 0 ? (
+          ) : slotsError ? <View style={styles.slotsEmpty}><Text accessibilityRole="alert" style={styles.slotsEmptyText}>{slotsError}</Text><TouchableOpacity accessibilityRole="button" onPress={fetchSlots}><Text style={styles.slotsEmptyText}>Retry availability</Text></TouchableOpacity></View> : slots.length === 0 ? (
             <View style={styles.slotsEmpty}>
               <Ionicons name="calendar-outline" size={36} color={COLORS.textMuted} />
               <Text style={styles.slotsEmptyText}>No slots available for this date.</Text>
@@ -326,21 +351,23 @@ export default function TurfDetailsScreen({ route, navigation }) {
           <PrimaryButton
             title={
               selectedSlot
-                ? 'Book Now'
+                ? 'Reserve slot'
                 : slotsLoading
                 ? 'Loading...'
                 : 'Select a slot to continue'
             }
-            disabled={!selectedSlot || slotsLoading}
+            disabled={!selectedSlot || slotsLoading || !!slotsError}
             onPress={handleBookNow}
           />
         </View>
       </View>
+      <Modal visible={priceSheet} animationType="slide" onRequestClose={() => setPriceSheet(false)}><SafeAreaView style={styles.safe} edges={['top', 'bottom']}><ScrollView contentContainerStyle={{ padding: SPACING.lg, gap: SPACING.md }}><TouchableOpacity accessibilityRole="button" onPress={() => setPriceSheet(false)}><Text style={styles.sectionTitle}>Close</Text></TouchableOpacity><Text style={styles.sectionTitle}>AI Price Guide</Text>{selectedSlot ? <><Text style={styles.pricingInfoText}>Selected: {selectedSlot.timeLabel}</Text><Text style={styles.pricingInfoText}>Base: ৳{selectedSlot.basePrice}</Text><Text style={styles.pricingInfoText}>Adjustment: ৳{selectedSlot.price - selectedSlot.basePrice}</Text><Text style={styles.pricingInfoText}>Total quote: ৳{selectedSlot.price}</Text><Text style={styles.pricingInfoText}>{selectedSlot.pricingExplanation}</Text><Text style={styles.pricingInfoText}>Model source: {selectedSlot.modelSource || 'Local pricing model'}</Text><Text style={styles.pricingInfoText}>{selectedSlot.sampleData ? 'Not enough booking history; model uses fallback inputs.' : 'Based on recorded booking activity.'}</Text></> : null}</ScrollView></SafeAreaView></Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  galleryImage: { width: 220, height: 145, borderRadius: RADIUS.lg, backgroundColor: COLORS.border },
   safe: {
     flex: 1,
     backgroundColor: COLORS.background,

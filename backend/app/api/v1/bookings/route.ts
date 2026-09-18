@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
-import QRCode from "qrcode";
+import { demoPaymentAdapter } from "@/lib/payment";
 
 const ALLOWED_PAYMENT_METHODS = ["BKASH", "NAGAD", "ROCKET", "CARD"];
 
-export async function GET(_request: NextRequest) {
+export async function GET(request: NextRequest) {
   try {
     const currentUser = await getCurrentUser();
     if (!currentUser) {
@@ -21,6 +21,10 @@ export async function GET(_request: NextRequest) {
       );
     }
 
+    const { searchParams } = new URL(request.url);
+    const requestedLimit = Number(searchParams.get("limit") || 50);
+    const limit = Number.isFinite(requestedLimit) ? Math.min(100, Math.max(1, Math.floor(requestedLimit))) : 50;
+    const cursor = searchParams.get("cursor");
     const myBookings = await prisma.booking.findMany({
       where: { userId: currentUser.id },
       include: {
@@ -32,12 +36,15 @@ export async function GET(_request: NextRequest) {
           },
         },
       },
-      orderBy: { startTime: "desc" },
-      take: 50,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: limit + 1,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
     });
+    const page = myBookings.slice(0, limit);
+    const hasMore = myBookings.length > limit;
 
     return NextResponse.json({
-      data: myBookings.map((b) => ({
+      data: page.map((b) => ({
         id: b.id,
         referenceCode: b.referenceCode,
         turfId: b.turfId,
@@ -47,8 +54,10 @@ export async function GET(_request: NextRequest) {
         status: b.status,
         paymentMethod: b.paymentMethod,
         qrCode: null,
+        paymentMode: "DEMO",
         turf: b.turf,
       })),
+      page: { nextCursor: hasMore ? page[page.length - 1].id : null, hasMore },
       message: "Bookings loaded successfully.",
     });
   } catch (error) {
@@ -61,11 +70,14 @@ export async function GET(_request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  let requestedHoldId: string | null = null;
+  let requestedKey: string | null = null;
   try {
     const body = await request.json();
-    const { holdId, paymentMethod = "BKASH", accountNumber = "01812345678", transactionId } = body;
+    const { holdId, paymentMethod = "BKASH" } = body;
+    requestedHoldId = typeof holdId === "string" ? holdId : null;
 
-    if (!holdId) {
+    if (typeof holdId !== "string" || !holdId) {
       return NextResponse.json(
         { error: { code: "BAD_REQUEST", message: "Hold ID is required to confirm booking." } },
         { status: 400 }
@@ -94,6 +106,28 @@ export async function POST(request: NextRequest) {
     }
 
     const now = new Date();
+    const suppliedKey = request.headers.get("Idempotency-Key");
+    if (suppliedKey && (suppliedKey.length > 128 || suppliedKey.length < 8)) return NextResponse.json({ error: { code: "BAD_REQUEST", message: "Invalid idempotency key." } }, { status: 400 });
+    const idempotencyKey = suppliedKey || `hold-${holdId}`;
+    requestedKey = idempotencyKey;
+
+    const replay = await prisma.paymentAttempt.findUnique({ where: { idempotencyKey }, include: { booking: { include: { turf: true } } } });
+    if (replay?.booking) {
+      if (replay.booking.holdId !== holdId) return NextResponse.json({ error: { code: "IDEMPOTENCY_CONFLICT", message: "This key was used for a different hold." } }, { status: 409 });
+      if (replay.booking.userId !== currentUser.id && currentUser.role !== "ADMIN") return NextResponse.json({ error: { code: "FORBIDDEN", message: "This booking belongs to another account." } }, { status: 403 });
+      return NextResponse.json({ data: { ...replay.booking, paymentMode: "DEMO", qrCode: null }, message: "Demo booking already confirmed. No money was charged." });
+    }
+
+    const existingBooking = await prisma.booking.findUnique({
+      where: { holdId },
+      include: { turf: { select: { name: true, area: true, city: true, address: true, pitchFormats: true } }, user: { select: { name: true, phone: true, email: true } } },
+    });
+    if (existingBooking) {
+      if (existingBooking.userId !== currentUser.id && currentUser.role !== "ADMIN") {
+        return NextResponse.json({ error: { code: "FORBIDDEN", message: "This booking belongs to another account." } }, { status: 403 });
+      }
+      return NextResponse.json({ data: { ...existingBooking, paymentMode: "DEMO", qrCode: null }, message: "Demo booking already confirmed. No money was charged." });
+    }
 
     const result = await prisma.$transaction(async (tx) => {
       // 1. Verify hold
@@ -119,7 +153,7 @@ export async function POST(request: NextRequest) {
       const timePart = Date.now().toString(36).toUpperCase();
       const randHex = crypto.randomBytes(4).toString("hex").toUpperCase();
       const referenceCode = `SPZ-2026-${timePart}-${randHex}`;
-      const generatedTxId = transactionId || `TXN${Date.now().toString().slice(-8)}`;
+      const generatedTxId = `DEMO-${referenceCode}`;
 
       // 3. Create confirmed booking
       const booking = await tx.booking.create({
@@ -162,47 +196,46 @@ export async function POST(request: NextRequest) {
       });
 
       // 5. Record payment attempt
+      const capture = demoPaymentAdapter.capture({ amount: hold.price, method: paymentMethod, idempotencyKey });
       await tx.paymentAttempt.create({
         data: {
           bookingId: booking.id,
           holdId: hold.id,
-          provider: paymentMethod,
-          accountNumber,
-          amount: hold.price,
-          status: "SUCCEEDED",
-          idempotencyKey: `idemp_${booking.id}_${Date.now()}`,
+          provider: capture.provider,
+          accountNumber: capture.accountNumber,
+          amount: capture.amount,
+          status: capture.status,
+          idempotencyKey: capture.idempotencyKey,
         },
       });
 
       return booking;
     });
 
-    // Generate real QR code for match entry
-    const qrData = JSON.stringify({
-      ref: result.referenceCode,
-      turf: result.turf.name,
-      time: result.startTime,
-      player: result.user.name,
-      status: "VERIFIED",
-    });
-    const qrCodeDataUrl = await QRCode.toDataURL(qrData, {
-      width: 250,
-      margin: 2,
-      color: { dark: "#064E3B", light: "#FFFFFF" },
-    });
-
     return NextResponse.json(
       {
         data: {
           ...result,
-          qrCode: qrCodeDataUrl,
+          paymentMode: "DEMO",
+          qrCode: null,
         },
-        message: "Match slot booked successfully! Your pass is ready.",
+        message: "Demo booking confirmed. No money was charged.",
       },
       { status: 201 }
     );
   } catch (error: unknown) {
     const err = error as Error;
+    if ((error as { code?: string }).code === "P2002" && requestedKey && requestedHoldId) {
+      const replay = await prisma.paymentAttempt.findUnique({ where: { idempotencyKey: requestedKey }, include: { booking: true } });
+      if (replay?.booking && replay.booking.holdId !== requestedHoldId) return NextResponse.json({ error: { code: "IDEMPOTENCY_CONFLICT", message: "This key was used for a different hold." } }, { status: 409 });
+    }
+    if ((error as { code?: string }).code === "P2002" && requestedHoldId) {
+      const existing = await prisma.booking.findUnique({ where: { holdId: requestedHoldId }, include: { turf: true, user: { select: { name: true } } } });
+      const currentUser = await getCurrentUser();
+      if (existing && currentUser && (existing.userId === currentUser.id || currentUser.role === "ADMIN")) {
+        return NextResponse.json({ data: { ...existing, paymentMode: "DEMO", qrCode: null }, message: "Demo booking already confirmed. No money was charged." });
+      }
+    }
     if (err.message === "HOLD_NOT_FOUND") {
       return NextResponse.json(
         { error: { code: "NOT_FOUND", message: "Hold reservation was not found." } },

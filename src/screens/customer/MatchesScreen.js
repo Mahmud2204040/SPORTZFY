@@ -33,7 +33,7 @@ const VIEW_OPTIONS = [
 const FORMAT_OPTIONS = ['All', '7v7', '5v5', '11v11'];
 
 export default function MatchesScreen({ navigation }) {
-  const { user, logout } = useAuth();
+  const { logout } = useAuth();
 
   const handleUnauthorized = async (err) => {
     if (err?.status === 401) {
@@ -130,7 +130,6 @@ export default function MatchesScreen({ navigation }) {
           refreshing={refreshing}
           onRefresh={onRefresh}
           onMatchPress={(m) => navigation.navigate('MatchDetail', { matchId: m.id })}
-          user={user}
         />
       )}
 
@@ -196,7 +195,7 @@ function DiscoverView({ matches, loading, refreshing, onRefresh, formatFilter, s
 }
 
 // --- My Squads Tab ---
-function MySquadsView({ myMatches, loading, refreshing, onRefresh, onMatchPress, user }) {
+function MySquadsView({ myMatches, loading, refreshing, onRefresh, onMatchPress }) {
   const hosting = myMatches.hosting || [];
   const joined = myMatches.joined || [];
 

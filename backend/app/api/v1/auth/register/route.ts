@@ -3,17 +3,21 @@ import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { encodeSession, SESSION_COOKIE_NAME, SessionUser } from "@/lib/auth";
+import { consumeAuthAttempt } from "@/lib/auth-rate-limit";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { name, email, password, phone, role = "CUSTOMER" } = body;
 
-    if (!name || !email || !password) {
+    if (typeof name !== "string" || !name.trim() || name.length > 100 || typeof email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.length > 254 || typeof password !== "string" || password.length < 8 || password.length > 128 || (phone != null && (typeof phone !== "string" || phone.length > 30))) {
       return NextResponse.json(
         { error: { code: "BAD_REQUEST", message: "Name, email, and password are required." } },
         { status: 400 }
       );
+    }
+    if (!(await consumeAuthAttempt(request, email.trim(), "register"))) {
+      return NextResponse.json({ error: { code: "RATE_LIMITED", message: "Too many registration attempts. Try again later." } }, { status: 429, headers: { "Retry-After": "3600" } });
     }
 
     const cleanEmail = email.toLowerCase().trim();
@@ -38,7 +42,7 @@ export async function POST(request: NextRequest) {
 
     const newUser = await prisma.user.create({
       data: {
-        name,
+        name: name.trim(),
         email: cleanEmail,
         password: hashedPassword,
         phone: phone || null,

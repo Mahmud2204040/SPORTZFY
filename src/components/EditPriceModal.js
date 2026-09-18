@@ -11,7 +11,6 @@ import {
   Pressable,
   ScrollView,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 
 import PrimaryButton from './PrimaryButton';
 import { COLORS, SPACING, RADIUS, FONT_SIZE, FONT_WEIGHT } from '../constants/theme';

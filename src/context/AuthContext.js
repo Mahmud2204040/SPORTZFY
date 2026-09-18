@@ -17,6 +17,7 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [pendingDestination, setPendingDestination] = useState(null);
 
   // Hydrate session from storage on app boot
   useEffect(() => {
@@ -102,6 +103,7 @@ export function AuthProvider({ children }) {
       await authApi.logout();
     } finally {
       setUser(null);
+      setPendingDestination(null);
       setLoading(false);
     }
   }
@@ -121,8 +123,10 @@ export function AuthProvider({ children }) {
       login,
       register,
       logout,
+      pendingDestination,
+      setPendingDestination,
     }),
-    [user, role, loading, initialLoading]
+    [user, role, loading, initialLoading, pendingDestination]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

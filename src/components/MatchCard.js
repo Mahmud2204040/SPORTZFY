@@ -22,39 +22,34 @@ const ROLE_COLORS = {
 export default function MatchCard({ match, onPress, style }) {
   if (!match) return null;
 
-  const turfImage = match.turf?.coverImage || 'https://images.unsplash.com/photo-1551958219-acbc608c6377?w=800&q=80';
+  const turfImage = match.turf?.coverImage;
   const turfName = match.turf?.name || match.area || 'Unknown Venue';
   const hostName = match.hostUser?.name || 'Match Captain';
   const openSpots = match.openSpots ?? 0;
   const totalSpots = match.totalSpots ?? 14;
   const isFull = openSpots <= 0;
-  const acceptedCount = (match.joinRequests || []).filter((r) => r.status === 'ACCEPTED').length;
   const roleColor = ROLE_COLORS[match.requiredRole] || COLORS.primary;
 
   // Format match time
   let matchTimeStr = '';
   if (match.matchTime) {
     const d = new Date(match.matchTime);
-    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    let h = d.getHours();
-    const m = String(d.getMinutes()).padStart(2, '0');
-    const ampm = h >= 12 ? 'PM' : 'AM';
-    h = h % 12 || 12;
-    matchTimeStr = `${days[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]} • ${h}:${m} ${ampm}`;
+    matchTimeStr = d.toLocaleString('en-GB', { timeZone: 'Asia/Dhaka', weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
   }
 
   return (
     <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityLabel={`${match.title}, ${matchTimeStr}, ${openSpots} spots open`}
       activeOpacity={0.85}
       onPress={() => onPress && onPress(match)}
       style={[styles.card, style]}
     >
       {/* Hero image */}
       <View style={styles.imageWrap}>
-        <Image source={{ uri: turfImage }} style={styles.image} resizeMode="cover" />
+        {turfImage ? <Image source={{ uri: turfImage }} style={styles.image} resizeMode="cover" /> : <View style={[styles.image, { alignItems: 'center', justifyContent: 'center', backgroundColor: '#EAF4ED' }]}><Ionicons name="football-outline" size={48} color={COLORS.primaryDark}/></View>}
         <View style={[styles.formatBadge, { backgroundColor: roleColor }]}>
-          <Text style={styles.formatText}>{match.sportFormat || '7v7'}</Text>
+          <Text style={styles.formatText}>{match.sportFormat || 'Format unavailable'}</Text>
         </View>
         {isFull && (
           <View style={styles.fullBadge}>
@@ -82,7 +77,7 @@ export default function MatchCard({ match, onPress, style }) {
         {/* Cost + Required role */}
         <View style={styles.metaRow}>
           <View style={styles.costWrap}>
-            <Text style={styles.costValue}>৳{match.costPerPlayer ?? 'Free'}</Text>
+            <Text style={styles.costValue}>{match.costPerPlayer === null || match.costPerPlayer === undefined ? 'Cost unavailable' : match.costPerPlayer === 0 ? 'Free' : `৳${match.costPerPlayer}`}</Text>
             <Text style={styles.costUnit}>/player</Text>
           </View>
           <View style={[styles.roleBadge, { backgroundColor: roleColor + '20' }]}>
@@ -109,7 +104,7 @@ export default function MatchCard({ match, onPress, style }) {
             style={[
               styles.progressBar,
               {
-                width: `${((totalSpots - openSpots) / totalSpots) * 100}%`,
+                width: `${totalSpots > 0 ? Math.max(0, Math.min(100, ((totalSpots - openSpots) / totalSpots) * 100)) : 0}%`,
                 backgroundColor: isFull ? COLORS.textMuted : COLORS.primary,
               },
             ]}

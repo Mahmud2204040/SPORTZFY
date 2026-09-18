@@ -1,6 +1,6 @@
 import type { Page } from '../types/models';
 export function resource<T>(response: {data: T}): T {
-  if (response?.data == null) throw new Error('The server returned an incomplete response. Please retry.');
+  if (response?.data === null || response?.data === undefined) throw new Error('The server returned an incomplete response. Please retry.');
   return response.data;
 }
 export function collection<T>(response: {data: T[]; page?: {nextCursor?: string | null}}): Page<T> {

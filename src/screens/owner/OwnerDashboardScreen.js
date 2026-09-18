@@ -121,6 +121,7 @@ export default function OwnerDashboardScreen({ navigation }) {
     }
 
     return list.map((insight) => ({
+      turfId: insight.turfId,
       title: insight.turfName || 'Pricing Insight',
       body: insight.recommendation || '',
       cta: 'View venue',
@@ -166,7 +167,20 @@ export default function OwnerDashboardScreen({ navigation }) {
         {error ? <View style={styles.messageCard}><Text style={styles.messageText}>{error}</Text><Pressable accessibilityRole="button" onPress={load}><Text style={styles.retryText}>Retry</Text></Pressable></View> : null}
         {loading ? <View style={styles.messageCard}><Text style={styles.messageText}>Loading your business activity…</Text></View> : null}
         {!loading && !error ? <>
+        <SectionTitle title="Upcoming Bookings" />
+        <View style={styles.section}>
+          {upcomingCards.length === 0 ? <Text style={styles.messageText}>No upcoming bookings.</Text> : upcomingCards.map((booking) => (
+            <OwnerBookingCard key={booking.id} booking={booking} />
+          ))}
+        </View>
+
+        <SectionTitle title="My Turf" />
+        <View style={styles.section}>
+          {heroTurf ? <TurfInfoCard turf={heroTurf} /> : <Text style={styles.messageText}>No venues linked to your account.</Text>}
+        </View>
+
         {/* KPI grid: 2x2 of stat tiles */}
+        <SectionTitle title="Recorded activity · all time and upcoming" />
         <View style={styles.kpiGrid}>
           <View style={styles.kpiRow}>
             <OwnerStatCard {...kpiCards[0]} />
@@ -185,25 +199,12 @@ export default function OwnerDashboardScreen({ navigation }) {
         <View style={styles.section}>
           {aiInsights.length === 0 ? <Text style={styles.messageText}>Not enough booking history for an insight yet.</Text> : aiInsights.map((insight, idx) => (
             <View key={insight.id || idx} style={{ marginBottom: SPACING.sm }}>
-              <AIInsightCard insight={insight} onPress={() => navigation.navigate('Turf')} />
+              <AIInsightCard insight={insight} onPress={() => navigation.navigate('Turf', { turfId: insight.turfId })} />
               {insight.dataBasis ? <Text style={styles.basisText}>{insight.dataBasis}</Text> : null}
             </View>
           ))}
         </View>
 
-        {/* My Turf */}
-        <SectionTitle title="My Turf" />
-        <View style={styles.section}>
-          {heroTurf ? <TurfInfoCard turf={heroTurf} /> : <Text style={styles.messageText}>No venues linked to your account.</Text>}
-        </View>
-
-        {/* Upcoming Bookings */}
-        <SectionTitle title="Upcoming Bookings" />
-        <View style={styles.section}>
-          {upcomingCards.length === 0 ? <Text style={styles.messageText}>No upcoming bookings.</Text> : upcomingCards.map((booking) => (
-            <OwnerBookingCard key={booking.id} booking={booking} />
-          ))}
-        </View>
         </> : null}
 
         {/* Bottom padding so the last card clears the tab bar */}

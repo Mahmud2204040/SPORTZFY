@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { calculateDynamicSlotPrice } from "@/lib/pricing";
+import { Prisma } from "@prisma/client";
 
 // Haversine Great-Circle Distance Formula in Kilometers
 function haversineDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -19,31 +19,19 @@ function haversineDistanceKm(lat1: number, lon1: number, lat2: number, lon2: num
 
 export async function GET(request: NextRequest) {
   try {
+    const now = new Date();
     const { searchParams } = new URL(request.url);
     const cityParam = searchParams.get("city");
     const formatParam = searchParams.get("format");
     const latParam = searchParams.get("lat");
     const lngParam = searchParams.get("lng");
 
-    // Default reference anchors
-    let userLat = latParam ? parseFloat(latParam) : null;
-    let userLng = lngParam ? parseFloat(lngParam) : null;
-
-    if (!userLat || !userLng || isNaN(userLat) || isNaN(userLng)) {
-      if (cityParam === "Dhaka") {
-        userLat = 23.7937; // Banani / Gulshan
-        userLng = 90.4043;
-      } else if (cityParam === "Sylhet") {
-        userLat = 24.8949; // Zindabazar
-        userLng = 91.8687;
-      } else {
-        userLat = 22.3592; // GEC Circle, Chattogram
-        userLng = 91.8217;
-      }
-    }
+    const userLat = latParam !== null ? Number(latParam) : null;
+    const userLng = lngParam !== null ? Number(lngParam) : null;
+    const hasLocation = userLat !== null && userLng !== null && Number.isFinite(userLat) && Number.isFinite(userLng) && Math.abs(userLat) <= 90 && Math.abs(userLng) <= 180;
 
     // Build base turf query filter
-    const whereClause: any = {
+    const whereClause: Prisma.TurfWhereInput = {
       status: "APPROVED",
     };
 
@@ -69,18 +57,12 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    const now = new Date();
-
-    // Attach dynamic pricing quote and GPS distance to each turf
+    // Distance appears only when the player supplied location coordinates.
     const enhancedTurfs = allTurfs.map((turf) => {
       const distance =
-        turf.latitude && turf.longitude
+        hasLocation && turf.latitude != null && turf.longitude != null
           ? haversineDistanceKm(userLat!, userLng!, turf.latitude, turf.longitude)
-          : 5.0;
-
-      const dynamicQuote = calculateDynamicSlotPrice(turf.basePricePerHour, now, {
-        venueRating: turf.rating,
-      });
+          : null;
 
       return {
         id: turf.id,
@@ -92,14 +74,14 @@ export async function GET(request: NextRequest) {
         coverImage: turf.coverImage,
         pitchFormats: turf.pitchFormats,
         basePricePerHour: turf.basePricePerHour,
-        currentDynamicPrice: dynamicQuote.finalPrice,
-        priceMultiplier: dynamicQuote.multiplier,
-        pricingBadge: dynamicQuote.badgeText,
+        currentDynamicPrice: null,
+        priceMultiplier: null,
+        pricingBadge: null,
         rating: turf.rating,
         reviewCount: turf.reviewCount || turf._count.reviews,
         totalBookings: turf._count.bookings,
         distanceKm: distance,
-        distanceLabel: `${distance} km away`,
+        distanceLabel: distance === null ? null : `${distance} km away`,
         hasFloodlights: turf.hasFloodlights,
         hasParking: turf.hasParking,
         hasChangingRoom: turf.hasChangingRoom,
@@ -108,14 +90,14 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    // 1. Shelf: Near You (Sorted by Haversine Distance)
+    // 1. Shelf: city discovery, or genuine distance when coordinates exist.
     const nearYouTurfs = [...enhancedTurfs]
-      .sort((a, b) => a.distanceKm - b.distanceKm)
+      .sort((a, b) => hasLocation ? (a.distanceKm ?? Number.POSITIVE_INFINITY) - (b.distanceKm ?? Number.POSITIVE_INFINITY) : a.name.localeCompare(b.name))
       .slice(0, 8);
 
-    // 2. Shelf: Best Deals & Off-Peak Savers (Sorted by basePricePerHour & multiplier ASC)
+    // 2. Lower published base rates. Slot quotes are shown only for selected dates.
     const bestDealsTurfs = [...enhancedTurfs]
-      .sort((a, b) => a.currentDynamicPrice - b.currentDynamicPrice)
+      .sort((a, b) => a.basePricePerHour - b.basePricePerHour)
       .slice(0, 8);
 
     // 3. Shelf: Community Favorites (Rating >= 4.7, Sorted by Rating & Bookings)
@@ -130,7 +112,7 @@ export async function GET(request: NextRequest) {
       .slice(0, 8);
 
     // 5. Shelf: Squads Needing Players (Open Matchmaking Posts)
-    const matchWhere: any = {
+    const matchWhere: Prisma.MatchPostWhereInput = {
       status: "OPEN",
       openSpots: { gt: 0 },
       matchTime: { gte: now },
@@ -156,7 +138,6 @@ export async function GET(request: NextRequest) {
         hostUser: {
           select: {
             name: true,
-            email: true,
           },
         },
       },
@@ -167,21 +148,21 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       meta: {
-        referenceCoords: { lat: userLat, lng: userLng },
+        referenceCoords: hasLocation ? { lat: userLat, lng: userLng } : null,
         totalVenuesFound: enhancedTurfs.length,
       },
       shelves: [
         {
           id: "near_you",
-          title: "Near You",
-          subtitle: "Pitches closest to your current location (GPS Haversine)",
+          title: hasLocation ? "Near You" : `Venues in ${cityParam || "your selection"}`,
+          subtitle: hasLocation ? "Venues ordered by distance from your location" : "Approved local venues",
           icon: "MapPin",
           turfs: nearYouTurfs,
         },
         {
           id: "best_deals",
-          title: "Best Deals & Off-Peak Savers",
-          subtitle: "Quality pitches with competitive pricing and off-peak discounts",
+          title: "Lower Base Rates",
+          subtitle: "Compare published hourly base rates; choose a slot for its live quote",
           icon: "Tag",
           turfs: bestDealsTurfs,
         },
@@ -194,8 +175,8 @@ export async function GET(request: NextRequest) {
         },
         {
           id: "top_picks",
-          title: "Top Picks For You",
-          subtitle: "Verified pitches equipped with floodlights and dedicated parking",
+          title: "Well-equipped Venues",
+          subtitle: "Approved venues with floodlights and parking",
           icon: "Sparkles",
           turfs: topPicksTurfs,
         },

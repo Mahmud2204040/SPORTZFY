@@ -1,0 +1,67 @@
+name: Mobile MVP checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sportzfy
+          POSTGRES_PASSWORD: sportzfy_test
+          POSTGRES_DB: sportzfy_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sportzfy -d sportzfy_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://sportzfy:sportzfy_test@localhost:5432/sportzfy_test
+      DATABASE_URL_UNPOOLED: postgresql://sportzfy:sportzfy_test@localhost:5432/sportzfy_test
+      SESSION_SECRET: ci_only_32_character_sportzfy_session_secret
+      CORS_ALLOWED_ORIGINS: http://localhost:8081
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install mobile dependencies
+        run: npm ci
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Check Expo dependency compatibility
+        run: npx expo install --check
+      - name: Mobile typecheck, lint and tests
+        run: npm run typecheck && npm run lint && npm test -- --silent
+      - name: Validate and apply clean database migrations
+        working-directory: backend
+        run: npx prisma validate && npx prisma migrate deploy && npx prisma db seed
+      - name: Backend typecheck, API lint and tests
+        working-directory: backend
+        run: npx tsc --noEmit -p tsconfig.json && npm run lint:api && npm test
+      - name: Build Android JavaScript bundle
+        run: npx expo export --platform android --output-dir .expo-ci-export
+      - name: Build backend
+        working-directory: backend
+        run: npm run build
+      - name: Start backend for API smoke
+        working-directory: backend
+        run: |
+          npm run start > /tmp/sportzfy-server.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3000/api/v1/turfs?limit=1 > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          cat /tmp/sportzfy-server.log
+          exit 1
+      - name: Run MVP API smoke
+        working-directory: backend
+        run: node scripts/smoke-mvp.mjs

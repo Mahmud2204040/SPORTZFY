@@ -5,7 +5,7 @@ export interface EdgeSessionUser {
   role: "CUSTOMER" | "OWNER" | "ADMIN";
 }
 
-const SESSION_SECRET = process.env.SESSION_SECRET || "sportzfy_prod_hmac_secret_2026_d78f9e1b2c3a4d5e6f7a8b9c0d1e2f3a";
+import { getSessionSecret } from "./session-secret";
 
 /**
  * Edge-compatible cryptographic session verification using Web Crypto API
@@ -22,7 +22,7 @@ export async function verifyEdgeSession(token: string): Promise<EdgeSessionUser 
     const encoder = new TextEncoder();
     const key = await crypto.subtle.importKey(
       "raw",
-      encoder.encode(SESSION_SECRET),
+      encoder.encode(getSessionSecret()),
       { name: "HMAC", hash: "SHA-256" },
       false,
       ["sign"]

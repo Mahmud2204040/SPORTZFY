@@ -7,4 +7,5 @@ export const bookingsApi = {
   },
   async getMyBookings(cursor?: string) { return collection<Booking>(await api.get(`/bookings?${queryString({cursor, limit:30})}`)); },
   async getBooking(id: string) { return resource<Booking>(await api.get(`/bookings/${encodeURIComponent(id)}`)); },
+  async cancelBooking(id: string, reason: string) { return resource<Booking>(await api.post(`/bookings/${encodeURIComponent(id)}/cancel`, {reason})); },
 };

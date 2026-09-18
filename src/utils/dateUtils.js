@@ -34,13 +34,10 @@ export function formatDateISO(date) {
 
 // Build a list of N upcoming dates starting from today.
 export function getUpcomingDates(count = 4) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
   const list = [];
   for (let i = 0; i < count; i++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() + i);
-    list.push(d);
+    const [year, month, day] = dhakaDateOffset(i).split('-').map(Number);
+    list.push(new Date(year, month - 1, day));
   }
   return list;
 }
@@ -66,4 +63,15 @@ export function formatCountdown(ms) {
   const min = Math.floor(totalSec / 60);
   const sec = totalSec % 60;
   return `${min}:${String(sec).padStart(2, '0')}`;
+}
+
+export function dhakaDateOffset(days = 0) {
+  const dhaka = new Date(Date.now() + 6 * 60 * 60 * 1000);
+  dhaka.setUTCDate(dhaka.getUTCDate() + days);
+  return dhaka.toISOString().slice(0, 10);
+}
+
+export function nextDhakaFriday() {
+  const today = new Date(`${dhakaDateOffset()}T00:00:00Z`);
+  return dhakaDateOffset((5 - today.getUTCDay() + 7) % 7);
 }

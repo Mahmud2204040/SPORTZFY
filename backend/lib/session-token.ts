@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { getSessionSecret } from "./session-secret";
 
 export interface SessionUser {
   id: string;
@@ -12,11 +13,7 @@ export interface SessionUser {
 export const SESSION_COOKIE_NAME = "sportzfy_session";
 export const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
-export const CANONICAL_SESSION_SECRET = "sportzfy_prod_hmac_secret_2026_d78f9e1b2c3a4d5e6f7a8b9c0d1e2f3a";
-
-export function getSessionSecret(): string {
-  return process.env.SESSION_SECRET || CANONICAL_SESSION_SECRET;
-}
+export { getSessionSecret };
 
 // Encode user payload into a cryptographically signed HMAC token
 export function encodeSession(user: SessionUser): string {

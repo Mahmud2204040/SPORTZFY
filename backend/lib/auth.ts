@@ -53,6 +53,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     };
   }
 
-  // Try bearer token first; if it's stale/invalid, fall back to cookie token.
-  return (await getUserFromToken(bearerToken)) || (await getUserFromToken(cookieToken));
+  // A supplied bearer credential is authoritative for native clients. Never
+  // silently switch accounts using a browser cookie when that token is invalid.
+  return bearerToken ? getUserFromToken(bearerToken) : getUserFromToken(cookieToken);
 }

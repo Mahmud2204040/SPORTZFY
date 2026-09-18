@@ -13,12 +13,13 @@ const FACILITIES = [
   ['hasChangingRoom', 'Changing room'], ['hasWater', 'Drinking water'],
 ];
 const STATUS_LABEL = { AVAILABLE: 'Available', BLOCKED: 'Inventory block', BOOKED: 'Booked', HELD: 'Held', UNAVAILABLE: 'Unavailable' };
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 function EditField({ label, value, onChangeText, multiline = false, keyboardType }) {
   return <View style={styles.field}><Text style={styles.fieldLabel}>{label}</Text><TextInput accessibilityLabel={label} value={value} onChangeText={onChangeText} multiline={multiline} keyboardType={keyboardType} style={[styles.input, multiline && styles.multiline]} placeholderTextColor={COLORS.textMuted} /></View>;
 }
 
-export default function OwnerTurfScreen() {
+export default function OwnerTurfScreen({ route }) {
   const [venues, setVenues] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [dates, setDates] = useState(() => upcomingDates(7));
@@ -31,10 +32,20 @@ export default function OwnerTurfScreen() {
   const [error, setError] = useState('');
   const [slotError, setSlotError] = useState('');
   const [editing, setEditing] = useState(false);
+  const [creatingNew, setCreatingNew] = useState(false);
   const [draft, setDraft] = useState(null);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [scheduleDraft, setScheduleDraft] = useState([]);
+  const [scheduleError, setScheduleError] = useState('');
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [walkInSlot, setWalkInSlot] = useState(null);
+  const [walkInName, setWalkInName] = useState('');
   const slotRequest = useRef(0);
 
   const selected = useMemo(() => venues.find(venue => venue.id === selectedId) || null, [venues, selectedId]);
+  useFocusEffect(useCallback(() => {
+    if (route?.params?.turfId) setSelectedId(route.params.turfId);
+  }, [route?.params?.turfId]));
   const loadVenues = useCallback(async () => {
     setLoading(true); setError('');
     try { const page = await ownerApi.getTurfs(); setVenues(page.items); setSelectedId(current => page.items.some(t => t.id === current) ? current : page.items[0]?.id || null); }
@@ -65,23 +76,69 @@ export default function OwnerTurfScreen() {
 
   function openEdit() {
     if (!selected) return;
-    setDraft({ name: selected.name || '', city: selected.city || '', area: selected.area || '', address: selected.address || '', description: selected.description || '', basePricePerHour: String(selected.basePricePerHour || ''), ...Object.fromEntries(FACILITIES.map(([key]) => [key, !!selected[key]])) });
+    const proposed = { ...selected, ...(selected.pendingRevision?.payload || {}) };
+    setDraft({ name: proposed.name || '', city: proposed.city || '', area: proposed.area || '', address: proposed.address || '', description: proposed.description || '', pitchFormats: proposed.pitchFormats || '', coverImage: proposed.coverImage || '', imageUrlsText: (proposed.imageUrls || proposed.images?.map(image => image.url) || []).join('\n'), basePricePerHour: String(proposed.basePricePerHour || ''), ...Object.fromEntries(FACILITIES.map(([key]) => [key, !!proposed[key]])) });
+    setCreatingNew(false);
     setEditing(true);
   }
 
+  function openCreate() {
+    setDraft({ name: '', city: '', area: '', address: '', description: '', pitchFormats: '', coverImage: '', imageUrlsText: '', basePricePerHour: '', ...Object.fromEntries(FACILITIES.map(([key]) => [key, false])) });
+    setCreatingNew(true); setEditing(true);
+  }
+
   async function saveEdit() {
-    if (!selected || !draft || busy) return;
+    if ((!selected && !creatingNew) || !draft || busy) return;
     const rate = Number(draft.basePricePerHour);
-    if (!draft.name.trim() || !draft.city.trim() || !draft.area.trim() || !Number.isFinite(rate) || rate <= 0) {
+    if (!draft.name.trim() || (!creatingNew && (!draft.city.trim() || !draft.area.trim() || !Number.isFinite(rate) || rate <= 0))) {
       Alert.alert('Check venue details', 'Name, city, area and a positive base hourly rate are required.'); return;
     }
     setBusy(true);
     try {
-      const updated = await ownerApi.updateTurf(selected.id, { ...draft, name: draft.name.trim(), city: draft.city.trim(), area: draft.area.trim(), basePricePerHour: rate });
-      setVenues(current => current.map(venue => venue.id === updated.id ? { ...venue, ...updated } : venue));
+      const { imageUrlsText, ...fields } = draft;
+      const payload = { ...fields, imageUrls: imageUrlsText.split(/\r?\n/).map(url => url.trim()).filter(Boolean), name: draft.name.trim(), city: draft.city.trim(), area: draft.area.trim(), basePricePerHour: Number.isFinite(rate) ? rate : 0 };
+      const updated = creatingNew ? await ownerApi.createDraft(payload) : await ownerApi.updateTurf(selected.id, payload);
+      if (creatingNew) { setVenues(current => [updated, ...current]); setSelectedId(updated.id); }
+      else setVenues(current => current.map(venue => venue.id === updated.id ? { ...venue, ...updated } : venue));
       setEditing(false); setDraft(null);
-      Alert.alert('Submitted for review', 'An administrator must approve these changes before the venue is visible to players again.');
+      Alert.alert(creatingNew ? 'Draft saved' : selected.status === 'APPROVED' ? 'Submitted for review' : 'Venue saved', creatingNew ? 'Complete the details, then submit this draft for review.' : selected.status === 'APPROVED' ? 'Your approved listing stays visible while an administrator reviews these changes.' : 'Your venue details have been saved.');
     } catch (e) { Alert.alert('Update failed', e?.message || 'Could not save venue details.'); }
+    finally { setBusy(false); }
+  }
+
+  async function submitDraft() {
+    if (!selected || busy) return;
+    setBusy(true);
+    try { const updated = await ownerApi.submitTurf(selected.id); setVenues(current => current.map(venue => venue.id === updated.id ? updated : venue)); Alert.alert('Submitted', 'The venue is in the administrator review queue.'); }
+    catch (e) { Alert.alert('Could not submit', e?.message || 'Complete the venue details and try again.'); }
+    finally { setBusy(false); }
+  }
+
+  async function openSchedule() {
+    if (!selected) return;
+    setScheduleOpen(true); setScheduleLoading(true); setScheduleError('');
+    try {
+      const result = await ownerApi.getSchedule(selected.id);
+      const shownRules = result.proposedRules || result.rules;
+      setScheduleDraft(WEEKDAYS.map((_, dayOfWeek) => {
+        const rule = shownRules.find(item => item.dayOfWeek === dayOfWeek);
+        return { dayOfWeek, enabled: result.source === 'LEGACY_TIMETABLE' || !!rule, openHour: String(rule?.openHour ?? 16), closeHour: String(rule?.closeHour ?? 25), hourlyRate: String(rule?.hourlyRate ?? selected.basePricePerHour) };
+      }));
+    } catch (e) { setScheduleError(e?.message || 'Could not load weekly hours.'); }
+    finally { setScheduleLoading(false); }
+  }
+
+  function updateScheduleDay(dayOfWeek, field, value) {
+    setScheduleDraft(current => current.map(item => item.dayOfWeek === dayOfWeek ? { ...item, [field]: value } : item));
+  }
+
+  async function saveSchedule() {
+    if (!selected || busy) return;
+    const rules = scheduleDraft.filter(item => item.enabled).map(item => ({ dayOfWeek: item.dayOfWeek, openHour: Number(item.openHour), closeHour: Number(item.closeHour), hourlyRate: Number(item.hourlyRate) }));
+    if (rules.length === 0 || rules.some(rule => !Number.isInteger(rule.openHour) || !Number.isInteger(rule.closeHour) || rule.openHour < 0 || rule.closeHour > 30 || rule.closeHour <= rule.openHour || !Number.isFinite(rule.hourlyRate) || rule.hourlyRate <= 0)) { setScheduleError('Keep at least one open day. Use valid whole hours and a positive hourly rate. Hours after midnight can be 24–30.'); return; }
+    setBusy(true); setScheduleError('');
+    try { const result = await ownerApi.updateSchedule(selected.id, rules); setScheduleOpen(false); await loadVenues(); await loadSlots(); Alert.alert(result.source === 'PENDING_REVIEW' ? 'Schedule submitted' : 'Weekly hours saved', result.source === 'PENDING_REVIEW' ? 'Current hours stay live until administrator approval.' : 'Availability now follows this schedule.'); }
+    catch (e) { setScheduleError(e?.message || 'Could not save weekly hours.'); }
     finally { setBusy(false); }
   }
 
@@ -90,11 +147,28 @@ export default function OwnerTurfScreen() {
     const interval = slot.status === 'BLOCKED' ? blocks.find(block => new Date(block.startTime) < new Date(slot.endTime) && new Date(block.endTime) > new Date(slot.startTime)) : null;
     if (slot.status === 'BLOCKED' && !interval) { setSlotError('Block details are unavailable. Refresh and try again.'); return; }
     const removing = !!interval;
+    if (!removing) {
+      Alert.alert('Reserve owner inventory', `${selected.name}\n${dateLabel(date)} · ${timeRange(slot.startTime, slot.endTime)}`, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Inventory block', onPress: () => updateBlock(slot, null) },
+        { text: 'Walk-in booking', onPress: () => { setWalkInName(''); setWalkInSlot(slot); } },
+      ]);
+      return;
+    }
     Alert.alert(
       removing ? 'Remove inventory block?' : 'Block this slot?',
       `${selected.name}\n${dateLabel(date)} · ${timeRange(interval?.startTime || slot.startTime, interval?.endTime || slot.endTime)}\n${removing ? 'This entire inventory block will become available again.' : 'Players will not be able to reserve this interval. This is not a paid booking.'}`,
       [{ text: 'Cancel', style: 'cancel' }, { text: removing ? 'Remove block' : 'Block slot', onPress: () => updateBlock(slot, interval) }]
     );
+  }
+
+  async function saveWalkIn() {
+    if (!selected || !walkInSlot || busy) return;
+    if (!walkInName.trim()) { setSlotError('Enter the walk-in customer name.'); return; }
+    setBusy(true); setSlotError('');
+    try { await ownerApi.createWalkIn({ turfId: selected.id, startTime: walkInSlot.startTime, endTime: walkInSlot.endTime, customerName: walkInName.trim() }); setWalkInSlot(null); await loadSlots(); }
+    catch (e) { setSlotError(e?.message || 'Could not record walk-in inventory.'); await loadSlots(); }
+    finally { setBusy(false); }
   }
 
   async function updateBlock(slot, interval) {
@@ -111,13 +185,16 @@ export default function OwnerTurfScreen() {
   return <SafeAreaView style={styles.safe} edges={['top']}>
     <Header section="Venue partner" title="Manage venues" subtitle="Details, base rate and live inventory" />
     <ScrollView contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { loadVenues(); loadSlots(); }} colors={[COLORS.primaryDark]} />}>
+      <Pressable accessibilityRole="button" onPress={openCreate} style={styles.editButton}><Ionicons name="add-circle-outline" size={20} color="#fff"/><Text style={styles.editText}>Create venue draft</Text></Pressable>
       {loading ? <View style={styles.state}><ActivityIndicator color={COLORS.primaryDark}/><Text style={styles.muted}>Loading your venues…</Text></View> : error ? <View style={styles.state}><Text style={styles.error}>{error}</Text><Pressable onPress={loadVenues} style={styles.retry}><Text style={styles.retryText}>Retry</Text></Pressable></View> : venues.length === 0 ? <View style={styles.state}><Ionicons name="football-outline" size={36} color={COLORS.primaryDark}/><Text style={styles.stateTitle}>No venues yet</Text><Text style={styles.muted}>A venue will appear here after it is linked to your owner account.</Text></View> : <>
         {venues.length > 1 ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.venuePicker}>{venues.map(venue => <Pressable key={venue.id} accessibilityRole="button" accessibilityState={{ selected: venue.id === selectedId }} onPress={() => setSelectedId(venue.id)} style={[styles.venueChip, venue.id === selectedId && styles.venueChipSelected]}><Text style={[styles.venueChipText, venue.id === selectedId && styles.venueChipTextSelected]} numberOfLines={1}>{venue.name}</Text></Pressable>)}</ScrollView> : null}
         {selected ? <>
           <View style={styles.venueCard}>
             {selected.coverImage ? <Image source={{ uri: selected.coverImage }} style={styles.cover} /> : <View style={styles.coverPlaceholder}><Ionicons name="football" size={35} color={COLORS.primaryDark}/></View>}
-            <View style={styles.venueBody}><Text style={styles.venueName}>{selected.name}</Text><Text style={styles.muted}>{[selected.area, selected.city].filter(Boolean).join(', ')}</Text><Text style={styles.status}>{String(selected.status || '').replace(/_/g, ' ')}</Text>{selected.status === 'PENDING_REVIEW' ? <Text style={styles.muted}>Awaiting administrator review. Players cannot see this venue yet.</Text> : null}<View style={styles.rateRow}><Text style={styles.rateLabel}>Base hourly rate</Text><Text style={styles.rate}>{money(selected.basePricePerHour)}</Text></View><Pressable accessibilityRole="button" onPress={openEdit} style={styles.editButton}><Ionicons name="create-outline" size={18} color="#fff"/><Text style={styles.editText}>Edit venue and base rate</Text></Pressable></View>
+            <View style={styles.venueBody}><Text style={styles.venueName}>{selected.name}</Text><Text style={styles.muted}>{[selected.area, selected.city].filter(Boolean).join(', ')}</Text><Text style={styles.status}>{String(selected.status || '').replace(/_/g, ' ')}</Text>{selected.pendingRevision ? <Text style={styles.muted}>Your proposed changes await review. The current approved listing remains live.</Text> : selected.status === 'PENDING_REVIEW' ? <Text style={styles.muted}>Awaiting administrator review. Players cannot see this venue yet.</Text> : null}<View style={styles.rateRow}><Text style={styles.rateLabel}>Base hourly rate</Text><Text style={styles.rate}>{money(selected.basePricePerHour)}</Text></View><Pressable accessibilityRole="button" onPress={openEdit} style={styles.editButton}><Ionicons name="create-outline" size={18} color="#fff"/><Text style={styles.editText}>Edit venue and base rate</Text></Pressable></View>
           </View>
+          {['DRAFT', 'REJECTED'].includes(selected.status) ? <Pressable accessibilityRole="button" accessibilityState={{ disabled: busy }} disabled={busy} onPress={submitDraft} style={styles.editButton}><Text style={styles.editText}>Submit venue for review</Text></Pressable> : null}
+          <Pressable accessibilityRole="button" onPress={openSchedule} style={styles.editButton}><Ionicons name="calendar-outline" size={18} color="#fff"/><Text style={styles.editText}>Weekly hours and rates</Text></Pressable>
           <Text style={styles.sectionTitle}>Slot inventory</Text><Text style={styles.muted}>Select a date, then tap an available slot to block it or an inventory block to remove it.</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dates}>{dates.map(day => <Pressable key={day} accessibilityRole="button" accessibilityState={{ selected: day === date }} onPress={() => setDate(day)} style={[styles.dateChip, day === date && styles.dateSelected]}><Text style={[styles.dateText, day === date && styles.dateTextSelected]}>{dateLabel(day)}</Text></Pressable>)}</ScrollView>
           {slotError ? <View style={styles.errorPanel}><Text style={styles.error}>{slotError}</Text><Pressable accessibilityRole="button" onPress={loadSlots}><Text style={styles.retryTextInline}>Refresh slots</Text></Pressable></View> : null}
@@ -126,7 +203,9 @@ export default function OwnerTurfScreen() {
       </>}
     </ScrollView>
 
-    <Modal visible={editing} animationType="slide" onRequestClose={() => !busy && setEditing(false)}><SafeAreaView style={styles.safe} edges={['top', 'bottom']}><KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}><View style={styles.modalHeader}><Text style={styles.modalTitle}>Edit venue</Text><Pressable accessibilityRole="button" accessibilityLabel="Close editor" disabled={busy} onPress={() => setEditing(false)} style={styles.close}><Ionicons name="close" size={24} color={COLORS.textPrimary}/></Pressable></View><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.modalContent}>{draft ? <><Text style={styles.muted}>Saving submits this venue for administrator review. It will be hidden from players until approved.</Text><EditField label="Venue name" value={draft.name} onChangeText={name => setDraft({ ...draft, name })}/><EditField label="City" value={draft.city} onChangeText={city => setDraft({ ...draft, city })}/><EditField label="Area" value={draft.area} onChangeText={area => setDraft({ ...draft, area })}/><EditField label="Address" value={draft.address} onChangeText={address => setDraft({ ...draft, address })}/><EditField label="Description" value={draft.description} multiline onChangeText={description => setDraft({ ...draft, description })}/><EditField label="Base price per hour (BDT)" value={draft.basePricePerHour} keyboardType="numeric" onChangeText={basePricePerHour => setDraft({ ...draft, basePricePerHour })}/><Text style={styles.fieldLabel}>Facilities</Text><View style={styles.facilities}>{FACILITIES.map(([key, label]) => <Pressable key={key} accessibilityRole="checkbox" accessibilityState={{ checked: !!draft[key] }} onPress={() => setDraft({ ...draft, [key]: !draft[key] })} style={[styles.facility, draft[key] && styles.facilityOn]}><Ionicons name={draft[key] ? 'checkmark-circle' : 'ellipse-outline'} size={18} color={draft[key] ? COLORS.primaryDark : COLORS.textMuted}/><Text style={styles.facilityText}>{label}</Text></Pressable>)}</View></> : null}</ScrollView><View style={styles.modalFooter}><Pressable accessibilityRole="button" accessibilityState={{ disabled: busy, busy }} disabled={busy} onPress={saveEdit} style={styles.saveButton}>{busy ? <ActivityIndicator color="#fff"/> : <Text style={styles.saveText}>Submit for review</Text>}</Pressable></View></KeyboardAvoidingView></SafeAreaView></Modal>
+    <Modal visible={editing} animationType="slide" onRequestClose={() => !busy && setEditing(false)}><SafeAreaView style={styles.safe} edges={['top', 'bottom']}><KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}><View style={styles.modalHeader}><Text style={styles.modalTitle}>{creatingNew ? 'Create draft' : 'Edit venue'}</Text><Pressable accessibilityRole="button" accessibilityLabel="Close editor" disabled={busy} onPress={() => setEditing(false)} style={styles.close}><Ionicons name="close" size={24} color={COLORS.textPrimary}/></Pressable></View><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.modalContent}>{draft ? <><Text style={styles.muted}>{creatingNew ? 'Save a draft, then submit it for review when complete.' : selected?.status === 'APPROVED' ? 'Saving submits changes for administrator review. Your approved listing stays visible until the decision.' : 'Save venue details before submitting for review.'}</Text><EditField label="Venue name" value={draft.name} onChangeText={name => setDraft({ ...draft, name })}/><EditField label="City" value={draft.city} onChangeText={city => setDraft({ ...draft, city })}/><EditField label="Area" value={draft.area} onChangeText={area => setDraft({ ...draft, area })}/><EditField label="Address" value={draft.address} onChangeText={address => setDraft({ ...draft, address })}/><EditField label="Description" value={draft.description} multiline onChangeText={description => setDraft({ ...draft, description })}/><EditField label="Pitch formats (e.g. 5v5, 7v7)" value={draft.pitchFormats} onChangeText={pitchFormats => setDraft({ ...draft, pitchFormats })}/><EditField label="Cover image URL" value={draft.coverImage} onChangeText={coverImage => setDraft({ ...draft, coverImage })}/><EditField label="Gallery image URLs (one per line, up to 10)" value={draft.imageUrlsText} multiline onChangeText={imageUrlsText => setDraft({ ...draft, imageUrlsText })}/><EditField label="Base price per hour (BDT)" value={draft.basePricePerHour} keyboardType="numeric" onChangeText={basePricePerHour => setDraft({ ...draft, basePricePerHour })}/><Text style={styles.fieldLabel}>Facilities</Text><View style={styles.facilities}>{FACILITIES.map(([key, label]) => <Pressable key={key} accessibilityRole="checkbox" accessibilityState={{ checked: !!draft[key] }} onPress={() => setDraft({ ...draft, [key]: !draft[key] })} style={[styles.facility, draft[key] && styles.facilityOn]}><Ionicons name={draft[key] ? 'checkmark-circle' : 'ellipse-outline'} size={18} color={draft[key] ? COLORS.primaryDark : COLORS.textMuted}/><Text style={styles.facilityText}>{label}</Text></Pressable>)}</View></> : null}</ScrollView><View style={styles.modalFooter}><Pressable accessibilityRole="button" accessibilityState={{ disabled: busy, busy }} disabled={busy} onPress={saveEdit} style={styles.saveButton}>{busy ? <ActivityIndicator color="#fff"/> : <Text style={styles.saveText}>{creatingNew ? 'Save draft' : selected?.status === 'APPROVED' ? 'Submit changes for review' : 'Save details'}</Text>}</Pressable></View></KeyboardAvoidingView></SafeAreaView></Modal>
+    <Modal visible={!!walkInSlot} animationType="slide" onRequestClose={() => !busy && setWalkInSlot(null)}><SafeAreaView style={styles.safe} edges={['top', 'bottom']}><KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}><View style={styles.modalHeader}><Text style={styles.modalTitle}>Walk-in booking</Text><Pressable accessibilityRole="button" accessibilityLabel="Close walk-in form" disabled={busy} onPress={() => setWalkInSlot(null)} style={styles.close}><Ionicons name="close" size={24} color={COLORS.textPrimary}/></Pressable></View><View style={styles.modalContent}><Text style={styles.muted}>{walkInSlot ? `${dateLabel(date)} · ${timeRange(walkInSlot.startTime, walkInSlot.endTime)}` : ''}</Text><Text style={styles.muted}>This reserves inventory without an online payment.</Text><EditField label="Customer name" value={walkInName} onChangeText={setWalkInName}/>{slotError ? <Text accessibilityRole="alert" style={styles.error}>{slotError}</Text> : null}<Pressable accessibilityRole="button" accessibilityState={{ disabled: busy, busy }} disabled={busy} onPress={saveWalkIn} style={styles.saveButton}><Text style={styles.saveText}>{busy ? 'Saving…' : 'Record walk-in'}</Text></Pressable></View></KeyboardAvoidingView></SafeAreaView></Modal>
+    <Modal visible={scheduleOpen} animationType="slide" onRequestClose={() => !busy && setScheduleOpen(false)}><SafeAreaView style={styles.safe} edges={['top', 'bottom']}><KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}><View style={styles.modalHeader}><Text style={styles.modalTitle}>Weekly schedule</Text><Pressable accessibilityRole="button" accessibilityLabel="Close schedule" disabled={busy} onPress={() => setScheduleOpen(false)} style={styles.close}><Ionicons name="close" size={24} color={COLORS.textPrimary}/></Pressable></View><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.modalContent}>{scheduleLoading ? <ActivityIndicator color={COLORS.primaryDark}/> : scheduleDraft.map(item => <View key={item.dayOfWeek} style={styles.venueCard}><View style={{ padding: SPACING.md, gap: SPACING.sm }}><Pressable accessibilityRole="checkbox" accessibilityState={{ checked: item.enabled }} onPress={() => updateScheduleDay(item.dayOfWeek, 'enabled', !item.enabled)} style={styles.facility}><Ionicons name={item.enabled ? 'checkmark-circle' : 'ellipse-outline'} size={20} color={COLORS.primaryDark}/><Text style={styles.fieldLabel}>{WEEKDAYS[item.dayOfWeek]}</Text></Pressable>{item.enabled ? <><EditField label="Open hour (0–23)" value={item.openHour} keyboardType="numeric" onChangeText={value => updateScheduleDay(item.dayOfWeek, 'openHour', value)}/><EditField label="Close hour (up to 30 for after midnight)" value={item.closeHour} keyboardType="numeric" onChangeText={value => updateScheduleDay(item.dayOfWeek, 'closeHour', value)}/><EditField label="Hourly rate (BDT)" value={item.hourlyRate} keyboardType="numeric" onChangeText={value => updateScheduleDay(item.dayOfWeek, 'hourlyRate', value)}/></> : <Text style={styles.muted}>Closed</Text>}</View></View>)}{scheduleError ? <Text accessibilityRole="alert" style={styles.error}>{scheduleError}</Text> : null}</ScrollView><View style={styles.modalFooter}><Pressable accessibilityRole="button" accessibilityState={{ disabled: busy || scheduleLoading, busy }} disabled={busy || scheduleLoading} onPress={saveSchedule} style={styles.saveButton}><Text style={styles.saveText}>{busy ? 'Saving…' : 'Save weekly schedule'}</Text></Pressable></View></KeyboardAvoidingView></SafeAreaView></Modal>
   </SafeAreaView>;
 }
 

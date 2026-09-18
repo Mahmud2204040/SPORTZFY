@@ -4,17 +4,21 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { encodeSession, SESSION_COOKIE_NAME, SessionUser } from "@/lib/auth";
+import { consumeAuthAttempt, clearAuthAttempts } from "@/lib/auth-rate-limit";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { email, password, requestedRole } = body;
 
-    if (!email || !password) {
+    if (typeof email !== "string" || typeof password !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.length > 254 || password.length < 1 || password.length > 128) {
       return NextResponse.json(
         { error: { code: "BAD_REQUEST", message: "Email and password are required." } },
         { status: 400 }
       );
+    }
+    if (!(await consumeAuthAttempt(request, email.trim(), "login"))) {
+      return NextResponse.json({ error: { code: "RATE_LIMITED", message: "Too many sign-in attempts. Try again in 15 minutes." } }, { status: 429, headers: { "Retry-After": "900" } });
     }
 
     const user = await prisma.user.findUnique({
@@ -83,6 +87,7 @@ export async function POST(request: NextRequest) {
         );
       }
     }
+    await clearAuthAttempts(request, email.trim());
 
     const sessionUser: SessionUser = {
       id: user.id,

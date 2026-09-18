@@ -1,4 +1,6 @@
 {
-  "compilerOptions": {},
-  "extends": "expo/tsconfig.base"
+  "compilerOptions": { "noEmit": true },
+  "extends": "expo/tsconfig.base",
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["backend", "node_modules"]
 }

@@ -1,8 +1,10 @@
 // Global state for the booking flow + bookings list.
-// Fetches real bookings from the API when authenticated, falls back to mock data.
+// Fetches authenticated bookings from the API.
 
-import React, { createContext, useContext, useMemo, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { bookingsApi } from '../api/bookings';
+import { useAuth } from './AuthContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const BookingContext = createContext(null);
 
@@ -15,42 +17,64 @@ export function useBooking() {
 }
 
 export function BookingProvider({ children }) {
+  const { user } = useAuth();
   const [bookings, setBookings] = useState([]);
   const [bookingsLoading, setBookingsLoading] = useState(false);
   const [bookingsError, setBookingsError] = useState('');
-  const [userLocation, setUserLocation] = useState('GEC, Chattogram');
+  const [nextCursor, setNextCursor] = useState(null);
+  const requestId = useRef(0);
+  const [userLocation, setUserLocation] = useState('');
   const [userCity, setUserCity] = useState('Chattogram');
+  const [userArea, setUserArea] = useState('');
+  const [locationHydrated, setLocationHydrated] = useState(false);
+
+  useEffect(() => {
+    AsyncStorage.getItem('sportzfy.manual-location').then(value => {
+      if (value) { const saved = JSON.parse(value); setUserCity(saved.city || 'Chattogram'); setUserArea(saved.area || ''); setUserLocation([saved.area, saved.city].filter(Boolean).join(', ')); }
+    }).catch(() => {}).finally(() => setLocationHydrated(true));
+  }, []);
+  useEffect(() => {
+    if (locationHydrated) AsyncStorage.setItem('sportzfy.manual-location', JSON.stringify({ city: userCity, area: userArea })).catch(() => {});
+  }, [userCity, userArea, locationHydrated]);
 
   // Fetch real bookings from API
-  const fetchBookings = useCallback(async () => {
+  useEffect(() => { requestId.current += 1; setBookings([]); setNextCursor(null); setBookingsError(''); }, [user?.id]);
+
+  const fetchBookings = useCallback(async (cursor = null) => {
+    if (!user) { setBookings([]); setNextCursor(null); return; }
+    const request = ++requestId.current;
     setBookingsLoading(true);
     setBookingsError('');
     try {
-      const res = await bookingsApi.getMyBookings();
+      const res = await bookingsApi.getMyBookings(cursor);
+      if (request !== requestId.current) return;
       if (res?.items && Array.isArray(res.items)) {
         // Normalize API booking shape to UI shape
         const normalized = res.items.map((b) => ({
-          id: b.referenceCode || b.id,
+          id: b.id,
           turfId: b.turfId,
-          turfName: b.turf?.name || 'Unknown Turf',
+          turfName: b.turf?.name || 'Venue unavailable',
           turfImage: b.turf?.coverImage || null,
-          date: b.startTime,
-          time: b.startTime,
+          date: new Date(b.startTime).toLocaleDateString('en-GB', { timeZone: 'Asia/Dhaka', day: 'numeric', month: 'short', year: 'numeric' }),
+          time: `${new Date(b.startTime).toLocaleTimeString('en-GB', { timeZone: 'Asia/Dhaka', hour: '2-digit', minute: '2-digit' })}–${new Date(b.endTime).toLocaleTimeString('en-GB', { timeZone: 'Asia/Dhaka', hour: '2-digit', minute: '2-digit' })}`,
+          startTime: b.startTime,
           price: b.totalAmount,
-          status: b.status === 'CONFIRMED' ? 'upcoming' : (b.status || 'upcoming'),
+          status: b.status === 'CANCELLED' ? 'cancelled' : b.status === 'COMPLETED' || (b.status === 'CONFIRMED' && new Date(b.endTime) <= new Date()) ? 'completed' : 'upcoming',
           paymentMethod: b.paymentMethod,
           referenceCode: b.referenceCode,
           qrCode: b.qrCode,
         }));
-        setBookings(normalized);
+        setBookings(current => cursor ? [...current, ...normalized] : normalized);
+        setNextCursor(res.nextCursor);
       }
     } catch (err) {
-      setBookings([]);
+      if (request !== requestId.current) return;
+      if (!cursor) setBookings([]);
       setBookingsError(err?.message || 'Could not load bookings.');
     } finally {
-      setBookingsLoading(false);
+      if (request === requestId.current) setBookingsLoading(false);
     }
-  }, []);
+  }, [user?.id]);
 
   // Add a confirmed booking to the top of the list
   function addBooking(booking) {
@@ -64,12 +88,15 @@ export function BookingProvider({ children }) {
       fetchBookings,
       bookingsLoading,
       bookingsError,
+      nextCursor,
       userLocation,
       userCity,
+      userArea,
       setUserLocation,
       setUserCity,
+      setUserArea,
     }),
-    [bookings, bookingsLoading, bookingsError, userLocation, userCity]
+    [bookings, bookingsLoading, bookingsError, nextCursor, userLocation, userCity, userArea]
   );
 
   return (

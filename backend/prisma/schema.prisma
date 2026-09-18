@@ -26,6 +26,8 @@ model User {
   reviews      Review[]
   matchPosts   MatchPost[]   @relation("HostMatches")
   joinRequests JoinRequest[]
+  moderationEvents ModerationEvent[]
+  bookingCancellations BookingCancellation[]
 }
 
 model Profile {
@@ -71,6 +73,8 @@ model Turf {
   bookings          Booking[]
   reviews           Review[]
   matchPosts        MatchPost[]
+  revisions         TurfRevision[]
+  moderationEvents  ModerationEvent[]
 }
 
 model TurfImage {
@@ -137,6 +141,7 @@ model Booking {
   updatedAt      DateTime         @updatedAt
 
   paymentAttempts PaymentAttempt[]
+  cancellation    BookingCancellation?
   matchPost       MatchPost?
   review          Review?
 }
@@ -201,4 +206,48 @@ model JoinRequest {
   createdAt     DateTime  @default(now())
 
   @@unique([matchPostId, userId])
+}
+
+model TurfRevision {
+  id          String   @id @default(cuid())
+  turfId      String
+  turf        Turf     @relation(fields: [turfId], references: [id], onDelete: Cascade)
+  payload     Json
+  status      String   @default("PENDING_REVIEW")
+  reason      String?
+  submittedAt DateTime @default(now())
+  reviewedAt  DateTime?
+  reviewedBy  String?
+
+  @@index([turfId, status])
+}
+
+model ModerationEvent {
+  id        String   @id @default(cuid())
+  turfId    String
+  turf      Turf     @relation(fields: [turfId], references: [id], onDelete: Cascade)
+  actorId   String
+  actor     User     @relation(fields: [actorId], references: [id])
+  revisionId String?
+  decision  String
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@index([turfId, createdAt])
+}
+
+model BookingCancellation {
+  id        String   @id @default(cuid())
+  bookingId String   @unique
+  booking   Booking  @relation(fields: [bookingId], references: [id])
+  actorId   String
+  actor     User     @relation(fields: [actorId], references: [id])
+  reason    String
+  createdAt DateTime @default(now())
+}
+
+model AuthRateLimit {
+  key         String   @id
+  count       Int      @default(0)
+  windowStart DateTime @default(now())
 }

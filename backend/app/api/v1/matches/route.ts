@@ -7,6 +7,9 @@ export async function GET(request: NextRequest) {
     const role = searchParams.get("role");
     const format = searchParams.get("format");
     const area = searchParams.get("area");
+    const requestedLimit = Number(searchParams.get("limit") || 30);
+    const limit = Number.isFinite(requestedLimit) ? Math.min(100, Math.max(1, Math.floor(requestedLimit))) : 30;
+    const cursor = searchParams.get("cursor");
 
     const where: Record<string, unknown> = {
       status: "OPEN",
@@ -49,7 +52,6 @@ export async function GET(request: NextRequest) {
             id: true,
             name: true,
             avatarUrl: true,
-            phone: true,
           },
         },
         joinRequests: {
@@ -59,10 +61,14 @@ export async function GET(request: NextRequest) {
           },
         },
       },
-      orderBy: { matchTime: "asc" },
+      orderBy: [{ matchTime: "asc" }, { id: "asc" }],
+      take: limit + 1,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
     });
 
-    return NextResponse.json({ data: matches, count: matches.length });
+    const page = matches.slice(0, limit);
+    const hasMore = matches.length > limit;
+    return NextResponse.json({ data: page, count: page.length, page: { nextCursor: hasMore ? page[page.length - 1].id : null, hasMore } });
   } catch (error) {
     console.error("Error fetching match posts:", error);
     return NextResponse.json(
@@ -98,7 +104,7 @@ export async function POST(request: NextRequest) {
       requiredRole = "Goalkeeper",
     } = body;
 
-    if (!title || !turfId || !matchTime) {
+    if (typeof title !== "string" || !title.trim() || title.length > 140 || typeof turfId !== "string" || !turfId || typeof matchTime !== "string" || (description != null && (typeof description !== "string" || description.length > 2000)) || !["5v5", "6v6", "7v7", "11v11"].includes(sportFormat)) {
       return NextResponse.json(
         { error: { code: "BAD_REQUEST", message: "Missing required match parameters." } },
         { status: 400 }
@@ -115,7 +121,7 @@ export async function POST(request: NextRequest) {
 
     const tSpots = Number(totalSpots);
     const oSpots = Number(openSpots);
-    if (isNaN(tSpots) || isNaN(oSpots) || oSpots <= 0 || oSpots > tSpots) {
+    if (!Number.isInteger(tSpots) || !Number.isInteger(oSpots) || tSpots < 2 || tSpots > 30 || oSpots <= 0 || oSpots > tSpots) {
       return NextResponse.json(
         { error: { code: "INVALID_SPOTS", message: "Open spots must be at least 1 and cannot exceed total spots." } },
         { status: 400 }
@@ -123,7 +129,7 @@ export async function POST(request: NextRequest) {
     }
 
     const cost = Number(costPerPlayer);
-    if (isNaN(cost) || cost < 0) {
+    if (!Number.isFinite(cost) || cost < 0 || cost > 100000) {
       return NextResponse.json(
         { error: { code: "INVALID_COST", message: "Cost per player cannot be negative." } },
         { status: 400 }
@@ -140,12 +146,13 @@ export async function POST(request: NextRequest) {
         { status: 404 }
       );
     }
+    if (turf.status !== "APPROVED") return NextResponse.json({ error: { code: "TURF_NOT_AVAILABLE", message: "Choose an approved venue." } }, { status: 400 });
 
     const matchPost = await prisma.matchPost.create({
       data: {
         hostUserId: currentUser.id,
         turfId,
-        title,
+        title: title.trim(),
         description: description || "Casual friendly match. Looking for reliable squad members.",
         sportFormat,
         matchTime: mDate,
@@ -158,7 +165,7 @@ export async function POST(request: NextRequest) {
       },
       include: {
         turf: true,
-        hostUser: true,
+        hostUser: { select: { id: true, name: true, avatarUrl: true } },
       },
     });
 

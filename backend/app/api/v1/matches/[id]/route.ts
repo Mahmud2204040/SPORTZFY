@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getCurrentUser } from "@/lib/auth";
 
 export async function GET(
   _request: NextRequest,
@@ -7,6 +8,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    const currentUser = await getCurrentUser();
     const match = await prisma.matchPost.findUnique({
       where: { id },
       include: {
@@ -16,7 +18,6 @@ export async function GET(
             id: true,
             name: true,
             avatarUrl: true,
-            phone: true,
           },
         },
         joinRequests: {
@@ -26,8 +27,6 @@ export async function GET(
                 id: true,
                 name: true,
                 avatarUrl: true,
-                phone: true,
-                profile: true,
               },
             },
           },
@@ -43,7 +42,13 @@ export async function GET(
       );
     }
 
-    return NextResponse.json({ data: match });
+    const visibleRequests = match.joinRequests.filter((joinRequest) =>
+      joinRequest.status === "ACCEPTED" ||
+      currentUser?.id === match.hostUserId ||
+      currentUser?.role === "ADMIN" ||
+      currentUser?.id === joinRequest.userId
+    );
+    return NextResponse.json({ data: { ...match, joinRequests: visibleRequests } });
   } catch (error) {
     console.error("Error fetching match detail:", error);
     return NextResponse.json(

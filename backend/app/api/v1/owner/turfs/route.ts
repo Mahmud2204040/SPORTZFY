@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import crypto from "crypto";
+import { venueImageUrls } from "@/lib/venue-images";
 
 export async function GET(_request: NextRequest) {
   try {
@@ -17,13 +19,15 @@ export async function GET(_request: NextRequest) {
     const turfs = await prisma.turf.findMany({
       where,
       include: {
+        images: { orderBy: { order: "asc" } },
         bookings: { select: { id: true, totalAmount: true } },
         blockedIntervals: true,
+        revisions: { where: { status: "PENDING_REVIEW" }, orderBy: { submittedAt: "desc" }, take: 1 },
       },
       orderBy: { createdAt: "desc" },
     });
 
-    return NextResponse.json({ data: turfs });
+    return NextResponse.json({ data: turfs.map(({ revisions, ...turf }) => ({ ...turf, pendingRevision: revisions[0] || null })) });
   } catch (error) {
     console.error("Error fetching owner turfs:", error);
     return NextResponse.json(
@@ -58,43 +62,48 @@ export async function POST(request: NextRequest) {
       hasWashroom = true,
       hasChangingRoom = true,
       hasWater = true,
+      draft = false,
     } = body;
+    const imageUrls = "imageUrls" in body ? venueImageUrls(body.imageUrls) : [];
 
-    if (!name || !city || !area || !basePricePerHour) {
+    if (typeof name !== "string" || !name.trim() || name.length > 140 || typeof city !== "string" || typeof area !== "string" || typeof address !== "string" && address != null || typeof description !== "string" && description != null || !Number.isFinite(Number(basePricePerHour)) || Number(basePricePerHour) < 0 || Number(basePricePerHour) > 100000 || (!draft && (!city.trim() || !area.trim() || Number(basePricePerHour) <= 0))) {
       return NextResponse.json(
         { error: { code: "BAD_REQUEST", message: "Missing required venue information." } },
         { status: 400 }
       );
     }
 
-    const slug = `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now().toString().slice(-4)}`;
+    const slug = `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${crypto.randomBytes(4).toString("hex")}`;
 
     const newTurf = await prisma.turf.create({
       data: {
         ownerId: currentUser.id,
-        name,
+        name: name.trim(),
         slug,
         city,
         area,
-        address: address || `${area}, ${city}`,
-        description: description || "Modern artificial grass football and cricket pitch with floodlights.",
-        pitchFormats: pitchFormats || "6v6, 7v7",
+        address: address || "",
+        description: description || "",
+        pitchFormats: pitchFormats || "",
         basePricePerHour: Number(basePricePerHour),
-        coverImage: coverImage || "https://images.unsplash.com/photo-1529900748604-07564a03e7a6?w=800&auto=format&fit=crop&q=80",
+        coverImage: coverImage || "",
         hasFloodlights: Boolean(hasFloodlights),
         hasParking: Boolean(hasParking),
         hasWashroom: Boolean(hasWashroom),
         hasChangingRoom: Boolean(hasChangingRoom),
         hasWater: Boolean(hasWater),
-        status: "PENDING_REVIEW",
+        status: draft ? "DRAFT" : "PENDING_REVIEW",
+        images: { create: imageUrls.map((url, order) => ({ url, order })) },
       },
+      include: { images: { orderBy: { order: "asc" } } },
     });
 
     return NextResponse.json(
-      { data: newTurf, message: "Venue submitted for administrator review." },
+      { data: newTurf, message: draft ? "Venue draft saved." : "Venue submitted for administrator review." },
       { status: 201 }
     );
   } catch (error) {
+    if (error instanceof Error && error.message === "INVALID_VENUE_IMAGES") return NextResponse.json({ error: { code: "BAD_REQUEST", message: "Use up to 10 unique HTTP or HTTPS image URLs." } }, { status: 400 });
     console.error("Error creating turf listing:", error);
     return NextResponse.json(
       { error: { code: "SERVER_ERROR", message: "Failed to create venue listing." } },

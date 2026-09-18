@@ -6,27 +6,19 @@ import { calculateDynamicSlotPrice } from "@/lib/pricing";
 export async function GET(_request: NextRequest) {
   try {
     const currentUser = await getCurrentUser();
-    if (!currentUser || (currentUser.role !== "OWNER" && currentUser.role !== "ADMIN")) {
+    if (!currentUser || currentUser.role !== "OWNER") {
       return NextResponse.json(
-        { error: { code: "FORBIDDEN", message: "Venue Owner or Administrator access required." } },
+        { error: { code: "FORBIDDEN", message: "Venue owner access required." } },
         { status: 403 }
       );
     }
 
-    const ownerWhere = currentUser.role === "ADMIN" ? { role: "OWNER" } : { id: currentUser.id };
+    const ownerWhere = { id: currentUser.id };
 
-    // Fetch the authenticated owner's recorded venues and bookings.
     const owner = await prisma.user.findFirst({
       where: ownerWhere,
       include: {
-        turfs: {
-          include: {
-            bookings: {
-              where: { status: "CONFIRMED" },
-            },
-            blockedIntervals: true,
-          },
-        },
+        turfs: true,
       },
     });
 
@@ -38,14 +30,17 @@ export async function GET(_request: NextRequest) {
     }
 
     const ownedTurfs = owner.turfs;
-    const allBookings = ownedTurfs.flatMap((t) => t.bookings);
-
-    // Calculate metrics
-    const totalRevenue = allBookings.reduce((sum, b) => sum + b.totalAmount, 0);
-    const totalBookingsCount = allBookings.length;
+    const turfIds = ownedTurfs.map(t => t.id);
+    const totals = await prisma.booking.aggregate({
+      where: { turfId: { in: turfIds }, status: "CONFIRMED" },
+      _count: { _all: true },
+      _sum: { totalAmount: true },
+    });
+    const totalRevenue = totals._sum.totalAmount ?? 0;
+    const totalBookingsCount = totals._count._all;
 
     const upcomingWhere = {
-      turfId: { in: ownedTurfs.map((t) => t.id) },
+      turfId: { in: turfIds },
       status: "CONFIRMED" as const,
       startTime: { gte: new Date() },
     };
@@ -54,6 +49,10 @@ export async function GET(_request: NextRequest) {
       _count: { _all: true },
       _sum: { totalAmount: true },
     });
+    const [bookingCounts, blockCounts] = await Promise.all([
+      prisma.booking.groupBy({ by: ["turfId"], where: upcomingWhere, _count: { _all: true } }),
+      prisma.blockedInterval.groupBy({ by: ["turfId"], where: { turfId: { in: turfIds }, endTime: { gt: new Date() } }, _count: { _all: true } }),
+    ]);
 
     // Keep the preview bounded; the dashboard totals come from all matching bookings.
     const upcomingBookings = await prisma.booking.findMany({
@@ -67,11 +66,18 @@ export async function GET(_request: NextRequest) {
     });
 
     // Show model suggestions only when this venue has enough recorded inputs.
-    const primaryTurf = ownedTurfs[0];
     const recentCutoff = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000);
-    const recentBookings = primaryTurf?.bookings.filter((booking) => booking.createdAt >= recentCutoff) || [];
-    const enoughHistory = !!primaryTurf && recentBookings.length >= 8;
-    const historicalDensity = Math.min(0.95, recentBookings.length / (28 * 8));
+    const recentCounts = await prisma.booking.groupBy({
+      by: ["turfId"],
+      where: { turfId: { in: turfIds }, status: "CONFIRMED", createdAt: { gte: recentCutoff } },
+      _count: { _all: true },
+    });
+    const primaryTurf = ownedTurfs.filter(turf => turf.status === "APPROVED").sort((left, right) =>
+      (recentCounts.find(item => item.turfId === right.id)?._count._all ?? 0) - (recentCounts.find(item => item.turfId === left.id)?._count._all ?? 0)
+    )[0];
+    const recentBookingsCount = recentCounts.find(item => item.turfId === primaryTurf?.id)?._count._all ?? 0;
+    const enoughHistory = !!primaryTurf && recentBookingsCount >= 8;
+    const historicalDensity = Math.min(0.95, recentBookingsCount / (28 * 8));
 
     // 1. Next Friday 8:00 PM BST (Peak floodlight window)
     const nextFridayPrime = new Date();
@@ -102,8 +108,8 @@ export async function GET(_request: NextRequest) {
         turfName: primaryTurf.name,
         targetWindow: "Friday · 8:00 PM Asia/Dhaka",
         demandTag: "Peak Hours",
-        historicalBookings: recentBookings.length,
-        dataBasis: `${recentBookings.length} confirmed bookings recorded in the last 28 days`,
+        historicalBookings: recentBookingsCount,
+        dataBasis: `${recentBookingsCount} confirmed bookings recorded in the last 28 days`,
         currentRate: primaryTurf.basePricePerHour,
         suggestedRate: primeQuote.finalPrice,
         recommendation: `Model quote for this Friday slot: ৳${primeQuote.finalPrice}/hr. Current base rate: ৳${primaryTurf.basePricePerHour}/hr. Review the schedule before changing your base rate.`,
@@ -115,8 +121,8 @@ export async function GET(_request: NextRequest) {
         turfName: primaryTurf.name,
         targetWindow: "Monday · 4:00 PM Asia/Dhaka",
         demandTag: "Saver Slot",
-        historicalBookings: recentBookings.length,
-        dataBasis: `${recentBookings.length} confirmed bookings recorded in the last 28 days`,
+        historicalBookings: recentBookingsCount,
+        dataBasis: `${recentBookingsCount} confirmed bookings recorded in the last 28 days`,
         currentRate: primaryTurf.basePricePerHour,
         suggestedRate: offPeakQuote.finalPrice,
         recommendation: `Model quote for this Monday slot: ৳${offPeakQuote.finalPrice}/hr. Current base rate: ৳${primaryTurf.basePricePerHour}/hr. Review the schedule before changing your base rate.`,
@@ -150,8 +156,8 @@ export async function GET(_request: NextRequest) {
           reviewCount: t.reviewCount,
           status: t.status,
           coverImage: t.coverImage,
-          activeBookingsCount: t.bookings.length,
-          blockedIntervalsCount: t.blockedIntervals.length,
+          activeBookingsCount: bookingCounts.find(item => item.turfId === t.id)?._count._all ?? 0,
+          blockedIntervalsCount: blockCounts.find(item => item.turfId === t.id)?._count._all ?? 0,
         })),
         upcomingBookings,
         aiPricingInsights,

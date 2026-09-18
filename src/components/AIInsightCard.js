@@ -5,7 +5,7 @@ import React from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { COLORS, SPACING, RADIUS, FONT_SIZE, FONT_WEIGHT } from '../constants/theme';
+import { SPACING, RADIUS, FONT_SIZE, FONT_WEIGHT } from '../constants/theme';
 
 export default function AIInsightCard({ insight, onPress }) {
   const {
@@ -95,7 +95,7 @@ export default function AIInsightCard({ insight, onPress }) {
       ) : null}
 
       {/* Demand probability */}
-      {demandProbability != null && (
+      {demandProbability !== null && demandProbability !== undefined && (
         <View style={styles.demandRow}>
           <Ionicons name="trending-up-outline" size={14} color="#7C3AED" />
           <Text style={styles.demandText}>

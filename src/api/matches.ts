@@ -8,4 +8,5 @@ export const matchesApi = {
   async createMatch(input: Omit<Match, 'id' | 'hostUserId' | 'status'> & {turfId: string}) {return resource<Match>(await api.post('/matches', input));},
   async joinMatch(id: string, preferredRole: string) {return resource<JoinRequest>(await api.post(`/matches/${id}/join`, {preferredRole}));},
   async decideRequest(id: string, requestId: string, decision: string) {return resource<JoinRequest>(await api.post(`/matches/${id}/requests/${requestId}/decision`, {decision}));},
+  async closeMatch(id: string) {return resource<Match>(await api.post(`/matches/${encodeURIComponent(id)}/close`, {}));},
 };

@@ -26,7 +26,7 @@ export default function BookingCard({ booking, onPress, style }) {
       onPress={() => onPress && onPress(booking)}
       style={[styles.card, style]}
     >
-      <Image source={{ uri: booking.turfImage }} style={styles.image} />
+      {booking.turfImage ? <Image source={{ uri: booking.turfImage }} style={styles.image} /> : <View style={styles.image} />}
 
       <View style={styles.body}>
         <View style={styles.headerRow}>
@@ -48,7 +48,7 @@ export default function BookingCard({ booking, onPress, style }) {
 
         <View style={styles.footerRow}>
           <Text style={styles.price}>৳{booking.price}</Text>
-          <Text style={styles.method}>Paid via {booking.paymentMethod}</Text>
+          <Text style={styles.method}>Demo · no charge</Text>
         </View>
       </View>
     </TouchableOpacity>

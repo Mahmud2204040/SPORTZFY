@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import { Prisma } from "@prisma/client";
 
 export async function GET(request: NextRequest) {
   try {
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const turfId = searchParams.get("turfId");
 
-    const where: any = {};
+    const where: Prisma.BlockedIntervalWhereInput = {};
     if (currentUser.role === "OWNER") {
       where.turf = { ownerId: currentUser.id };
     }
@@ -61,7 +62,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { turfId, startTime, endTime, reason = "Walk-in reservation" } = body;
 
-    if (!turfId || !startTime || !endTime) {
+    if (typeof turfId !== "string" || typeof startTime !== "string" || typeof endTime !== "string" || typeof reason !== "string" || reason.length > 200) {
       return NextResponse.json(
         { error: { code: "BAD_REQUEST", message: "Missing required slot interval parameters." } },
         { status: 400 }
@@ -85,30 +86,26 @@ export async function POST(request: NextRequest) {
     const slotStart = new Date(startTime);
     const slotEnd = new Date(endTime);
 
-    // Check if slot already has confirmed booking
-    const conflictingBooking = await prisma.booking.findFirst({
+    if (!Number.isFinite(slotStart.getTime()) || !Number.isFinite(slotEnd.getTime()) || slotStart >= slotEnd || slotEnd <= new Date() || slotEnd.getTime() - slotStart.getTime() > 4 * 3600000) {
+      return NextResponse.json({ error: { code: "BAD_REQUEST", message: "Choose a future interval of no more than four hours." } }, { status: 400 });
+    }
+
+    const blocked = await prisma.$transaction(async tx => {
+    const conflictingBooking = await tx.booking.findFirst({
       where: {
         turfId,
-        status: "CONFIRMED",
+        status: { in: ["CONFIRMED", "PENDING_PAYMENT"] },
         startTime: { lt: slotEnd },
         endTime: { gt: slotStart },
       },
     });
 
     if (conflictingBooking) {
-      return NextResponse.json(
-        {
-          error: {
-            code: "BOOKING_EXISTS",
-            message: "Cannot block slot: an online player has already confirmed a booking for this interval.",
-          },
-        },
-        { status: 409 }
-      );
+      throw new Error("BOOKING_EXISTS");
     }
 
     // Check if slot currently has an active customer checkout hold
-    const conflictingHold = await prisma.hold.findFirst({
+    const conflictingHold = await tx.hold.findFirst({
       where: {
         turfId,
         status: "ACTIVE",
@@ -119,18 +116,13 @@ export async function POST(request: NextRequest) {
     });
 
     if (conflictingHold) {
-      return NextResponse.json(
-        {
-          error: {
-            code: "HOLD_ACTIVE",
-            message: "Cannot block slot: a customer is currently in checkout for this slot (5-minute hold active). Please wait for the hold to conclude or expire.",
-          },
-        },
-        { status: 409 }
-      );
+      throw new Error("HOLD_ACTIVE");
     }
 
-    const blocked = await prisma.blockedInterval.create({
+    const conflictingBlock = await tx.blockedInterval.findFirst({ where: { turfId, startTime: { lt: slotEnd }, endTime: { gt: slotStart } } });
+    if (conflictingBlock) throw new Error("BLOCK_EXISTS");
+
+    return tx.blockedInterval.create({
       data: {
         turfId,
         startTime: slotStart,
@@ -138,12 +130,15 @@ export async function POST(request: NextRequest) {
         reason,
       },
     });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     return NextResponse.json(
       { data: blocked, message: "Slot successfully locked for walk-in / maintenance." },
       { status: 201 }
     );
   } catch (error) {
+    const code = error instanceof Error ? error.message : "";
+    if (["BOOKING_EXISTS", "HOLD_ACTIVE", "BLOCK_EXISTS"].includes(code) || (error as { code?: string }).code === "P2034") return NextResponse.json({ error: { code: "SLOT_CONFLICT", message: "This interval is booked, held, or already blocked. Refresh inventory and choose another slot." } }, { status: 409 });
     console.error("Error creating blocked interval:", error);
     return NextResponse.json(
       { error: { code: "SERVER_ERROR", message: "Failed to block interval." } },

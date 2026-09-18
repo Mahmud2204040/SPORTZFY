@@ -24,6 +24,7 @@ export async function GET(
             pitchFormats: true,
           },
         },
+        booking: { select: { id: true, referenceCode: true } },
       },
     });
 

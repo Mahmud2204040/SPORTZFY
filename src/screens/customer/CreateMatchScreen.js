@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,14 +7,13 @@ import {
   TextInput,
   TouchableOpacity,
   Alert,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 
 import PrimaryButton from '../../components/PrimaryButton';
 import { matchesApi } from '../../api/matches';
 import { turfsApi } from '../../api/turfs';
+import { dhakaDateOffset } from '../../utils/dateUtils';
 
 import { COLORS, SPACING, RADIUS, FONT_SIZE, FONT_WEIGHT } from '../../constants/theme';
 
@@ -28,7 +27,8 @@ export default function CreateMatchScreen({ navigation }) {
   const [selectedTurfId, setSelectedTurfId] = useState(null);
   const [format, setFormat] = useState('7v7');
   const [requiredRole, setRequiredRole] = useState('Goalkeeper');
-  const [matchTime, setMatchTime] = useState('');
+  const [matchDate, setMatchDate] = useState(dhakaDateOffset(1));
+  const [matchClock, setMatchClock] = useState('18:00');
   const [totalSpots, setTotalSpots] = useState('14');
   const [openSpots, setOpenSpots] = useState('1');
   const [costPerPlayer, setCostPerPlayer] = useState('150');
@@ -47,6 +47,7 @@ export default function CreateMatchScreen({ navigation }) {
   }, []);
 
   async function handleCreate() {
+    if (creating) return;
     if (!title.trim()) {
       Alert.alert('Missing Title', 'Please enter a match title.');
       return;
@@ -55,8 +56,12 @@ export default function CreateMatchScreen({ navigation }) {
       Alert.alert('Select Venue', 'Please choose a turf venue.');
       return;
     }
-    if (!matchTime.trim()) {
-      Alert.alert('Match Time', 'Enter match time as ISO format (e.g. 2026-08-20T18:00:00.000Z).');
+    const parsedDate = new Date(`${matchDate}T00:00:00Z`);
+    const validDate = /^\d{4}-\d{2}-\d{2}$/.test(matchDate) && Number.isFinite(parsedDate.getTime()) && parsedDate.toISOString().slice(0, 10) === matchDate;
+    const validTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(matchClock);
+    const matchTime = validDate && validTime ? new Date(`${matchDate}T${matchClock}:00+06:00`) : null;
+    if (!matchTime || matchTime <= new Date()) {
+      Alert.alert('Match time', 'Choose a future date and time in Asia/Dhaka.');
       return;
     }
 
@@ -67,7 +72,7 @@ export default function CreateMatchScreen({ navigation }) {
         description: description.trim() || undefined,
         turfId: selectedTurfId,
         sportFormat: format,
-        matchTime: matchTime.trim(),
+        matchTime: matchTime.toISOString(),
         totalSpots: parseInt(totalSpots, 10) || 14,
         openSpots: parseInt(openSpots, 10) || 1,
         costPerPlayer: parseFloat(costPerPlayer) || 150,
@@ -82,8 +87,6 @@ export default function CreateMatchScreen({ navigation }) {
       setCreating(false);
     }
   }
-
-  const selectedTurf = turfs.find((t) => t.id === selectedTurfId);
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -165,17 +168,18 @@ export default function CreateMatchScreen({ navigation }) {
           </View>
         </Field>
 
-        {/* Match Time (ISO) */}
-        <Field label="Match Time (ISO)">
+        {/* Local date and time */}
+        <Field label="Match date · Asia/Dhaka (YYYY-MM-DD)">
           <TextInput
             style={styles.input}
-            placeholder="2026-08-20T18:00:00.000Z"
+            placeholder="YYYY-MM-DD"
             placeholderTextColor={COLORS.textMuted}
-            value={matchTime}
-            onChangeText={setMatchTime}
+            value={matchDate}
+            onChangeText={setMatchDate}
             autoCapitalize="none"
           />
         </Field>
+        <Field label="Start time · Asia/Dhaka (HH:mm)"><TextInput style={styles.input} placeholder="18:00" value={matchClock} onChangeText={setMatchClock} keyboardType="numbers-and-punctuation" /></Field>
 
         {/* Spots */}
         <View style={styles.rowFields}>

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 
 import Header from '../../components/Header';
@@ -14,7 +15,7 @@ import BookingCard from '../../components/BookingCard';
 
 import { useBooking } from '../../context/BookingContext';
 import { useAuth } from '../../context/AuthContext';
-import { COLORS, SPACING, RADIUS, FONT_SIZE, FONT_WEIGHT } from '../../constants/theme';
+import { COLORS, SPACING, FONT_SIZE, FONT_WEIGHT } from '../../constants/theme';
 
 // Inner status tabs (Upcoming / Completed / Cancelled).
 const STATUS_OPTIONS = [
@@ -23,12 +24,12 @@ const STATUS_OPTIONS = [
   { id: 'cancelled', label: 'Cancelled' },
 ];
 
-export default function BookingsScreen() {
-  const { bookings, fetchBookings } = useBooking();
+export default function BookingsScreen({ navigation }) {
+  const { bookings, fetchBookings, bookingsLoading, bookingsError, nextCursor } = useBooking();
   const { user } = useAuth();
 
   // Fetch real bookings from API on mount
-  useEffect(() => { if (user) fetchBookings && fetchBookings(); }, [fetchBookings, user]);
+  useFocusEffect(React.useCallback(() => { if (user) fetchBookings(); }, [fetchBookings, user?.id]));
 
   const [statusTab, setStatusTab] = useState('upcoming');
 
@@ -46,13 +47,19 @@ export default function BookingsScreen() {
         statusTab={statusTab}
         setStatusTab={setStatusTab}
         bookings={filteredBookings}
+        loading={bookingsLoading}
+        error={bookingsError}
+        nextCursor={nextCursor}
+        onLoadMore={() => fetchBookings(nextCursor)}
+        onRetry={() => fetchBookings()}
+        onOpen={booking => navigation.navigate('BookingDetail', { bookingId: booking.id })}
       />}
     </SafeAreaView>
   );
 }
 
 // --- Sub-view: Bookings list ------------------------------------------------
-function BookingsView({ statusTab, setStatusTab, bookings }) {
+function BookingsView({ statusTab, setStatusTab, bookings, loading, error, nextCursor, onLoadMore, onRetry, onOpen }) {
   return (
     <View style={{ flex: 1, backgroundColor: COLORS.background }}>
       <View style={styles.innerToggleRow}>
@@ -67,13 +74,16 @@ function BookingsView({ statusTab, setStatusTab, bookings }) {
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
       >
-        {bookings.length === 0 ? (
+        {error ? <Text style={styles.emptySub}>{error}</Text> : null}
+        {error ? <Text accessibilityRole="button" onPress={onRetry} style={styles.emptySub}>Retry</Text> : null}
+        {loading && bookings.length === 0 ? <Text style={styles.emptySub}>Loading bookings…</Text> : bookings.length === 0 ? (
           <EmptyState statusTab={statusTab} />
         ) : (
           bookings.map((booking) => (
-            <BookingCard key={booking.id} booking={booking} />
+            <BookingCard key={booking.id} booking={booking} onPress={onOpen} />
           ))
         )}
+        {nextCursor ? <Text accessibilityRole="button" onPress={onLoadMore} style={styles.emptySub}>{loading ? 'Loading…' : 'Load more bookings'}</Text> : null}
         <View style={{ height: SPACING.xxl }} />
       </ScrollView>
     </View>

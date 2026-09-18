@@ -1,5 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 
+const safeReadOperations = new Set(["findUnique", "findUniqueOrThrow", "findFirst", "findFirstOrThrow", "findMany", "count", "aggregate", "groupBy"]);
+
 function makePrismaClient() {
   const baseClient = new PrismaClient({
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
@@ -11,7 +13,8 @@ function makePrismaClient() {
       async $allOperations({ operation, model, args, query }) {
         try {
           return await query(args);
-        } catch (error: any) {
+        } catch (caught: unknown) {
+          const error = caught as { message?: string; code?: string };
           const errorMessage = String(error?.message || "");
           const errorCode = String(error?.code || "");
           const lower = errorMessage.toLowerCase();
@@ -29,7 +32,8 @@ function makePrismaClient() {
             errorCode === "P1001" ||
             errorCode === "P1017";
 
-          if (isTransientConnectionError) {
+          // A dropped response can hide a committed write. Never replay a mutation.
+          if (isTransientConnectionError && safeReadOperations.has(operation)) {
             console.warn(
               `[Prisma Resilience] Auto-reconnecting after transient socket drop in ${model || "raw"}.${operation}:`,
               errorMessage.slice(0, 100)

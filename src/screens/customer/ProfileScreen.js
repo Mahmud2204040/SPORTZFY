@@ -51,7 +51,6 @@ export default function ProfileScreen({ navigation }) {
 
   useEffect(() => {
     loadMyMatches();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
   const hostingCount = myMatchesSummary?.hostingCount ?? 0;

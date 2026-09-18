@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Image, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,12 +18,18 @@ const FILTERS = [
 function statusLabel(status) { return String(status || 'UNKNOWN').replace(/_/g, ' ').toLowerCase().replace(/^./, c => c.toUpperCase()); }
 function formatDate(value) { return value ? new Date(value).toLocaleDateString('en-GB', { timeZone: 'Asia/Dhaka', day: 'numeric', month: 'short', year: 'numeric' }) : '—'; }
 function money(value) { return `৳ ${Number(value || 0).toLocaleString('en-BD')}`; }
+function proposedValue(key, value) {
+  if (key === 'availabilityRules' && Array.isArray(value)) return value.map(rule => `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][rule.dayOfWeek]} ${rule.openHour}:00–${rule.closeHour}:00 · ${money(rule.hourlyRate)}/hr`).join('\n');
+  if (key === 'imageUrls' && Array.isArray(value)) return value.length ? value.join('\n') : 'No gallery images';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  return String(value);
+}
 
 function DetailLine({ label, value }) {
   return <View style={styles.detailLine}><Text style={styles.detailLabel}>{label}</Text><Text style={styles.detailValue}>{value || '—'}</Text></View>;
 }
 
-export default function AdminDashboardScreen() {
+export default function AdminDashboardScreen({ navigation }) {
   const { logout } = useAuth();
   const [stats, setStats] = useState(null);
   const [turfs, setTurfs] = useState([]);
@@ -38,6 +44,7 @@ export default function AdminDashboardScreen() {
   const [detailError, setDetailError] = useState('');
   const [busy, setBusy] = useState(false);
   const [pendingDecision, setPendingDecision] = useState(null);
+  const [reviewReason, setReviewReason] = useState('');
 
   const load = useCallback(async (pull = false) => {
     if (pull) setRefreshing(true); else setLoading(true);
@@ -55,7 +62,7 @@ export default function AdminDashboardScreen() {
   const pendingCount = turfs.filter(t => t.status === 'PENDING_REVIEW').length;
 
   async function openDetail(id) {
-    setDetail({ id }); setDetailLoading(true); setDetailError(''); setNotice(''); setPendingDecision(null);
+    setDetail({ id }); setDetailLoading(true); setDetailError(''); setNotice(''); setPendingDecision(null); setReviewReason('');
     try { setDetail(await adminApi.getTurf(id)); }
     catch (error) { setDetailError(error?.message || 'Could not load submission details.'); }
     finally { setDetailLoading(false); }
@@ -68,9 +75,10 @@ export default function AdminDashboardScreen() {
 
   async function review(nextStatus) {
     if (!detail?.id || busy) return;
+    if (nextStatus === 'REJECTED' && reviewReason.trim().length < 3) { setDetailError('Enter a reason for rejection.'); return; }
     setBusy(true); setDetailError('');
     try {
-      const reviewed = await adminApi.reviewTurf(detail.id, nextStatus);
+      const reviewed = await adminApi.reviewTurf(detail.id, nextStatus, reviewReason.trim());
       setDetail(null);
       setPendingDecision(null);
       setNotice(`${reviewed.name} ${nextStatus === 'APPROVED' ? 'approved' : 'rejected'} successfully.`);
@@ -100,6 +108,9 @@ export default function AdminDashboardScreen() {
         <Metric label="Demo booking value" value={money(stats.totalGMV)} icon="wallet-outline" />
         <Metric label="Estimated 5% fee" value={money(stats.platformCommission)} icon="trending-up-outline" />
       </View> : null}
+      <View style={styles.metricsHeading}><Text style={styles.eyebrow}>OVERSIGHT</Text><Text style={styles.heading}>Platform records</Text></View>
+      <Pressable accessibilityRole="button" onPress={() => navigation.navigate('AdminOversight', { section: 'users' })} style={styles.venueCard}><View style={styles.venueTop}><Ionicons name="people-outline" size={22} color={COLORS.primaryDark}/><Text style={styles.venueName}>Users</Text><Ionicons name="chevron-forward" size={20} color={COLORS.textMuted}/></View></Pressable>
+      <Pressable accessibilityRole="button" onPress={() => navigation.navigate('AdminOversight', { section: 'bookings' })} style={styles.venueCard}><View style={styles.venueTop}><Ionicons name="receipt-outline" size={22} color={COLORS.primaryDark}/><Text style={styles.venueName}>Bookings</Text><Ionicons name="chevron-forward" size={20} color={COLORS.textMuted}/></View></Pressable>
     </ScrollView>
 
     <Modal visible={!!detail} animationType="slide" onRequestClose={() => { if (!busy) { setDetail(null); setPendingDecision(null); } }}>
@@ -111,12 +122,13 @@ export default function AdminDashboardScreen() {
             <Text style={styles.detailName}>{detail.name}</Text>
             <Text style={styles.detailAddress}>{[detail.address, detail.area, detail.city].filter(Boolean).join(' · ')}</Text>
             <View style={styles.detailCard}><DetailLine label="Status" value={statusLabel(detail.status)} /><DetailLine label="Last updated" value={formatDate(detail.updatedAt)} /><DetailLine label="Owner" value={detail.owner?.name} /><DetailLine label="Email" value={detail.owner?.email} /><DetailLine label="Phone" value={detail.owner?.phone} /><DetailLine label="Pitch formats" value={detail.pitchFormats} /><DetailLine label="Base price" value={`${money(detail.basePricePerHour)} per hour`} /><DetailLine label="Bookings" value={String(detail.bookings?.length ?? 0)} /></View>
+            {detail.pendingRevision ? <View style={styles.detailCard}><Text style={styles.descriptionTitle}>Proposed changes</Text><Text style={styles.description}>The current approved listing stays public until approval.</Text>{Object.entries(detail.pendingRevision.payload || {}).map(([key, value]) => <DetailLine key={key} label={key.replace(/([A-Z])/g, ' $1')} value={proposedValue(key, value)} />)}</View> : null}
             {detail.description ? <View style={styles.detailCard}><Text style={styles.descriptionTitle}>Description</Text><Text style={styles.description}>{detail.description}</Text></View> : null}
             <View style={styles.detailCard}><Text style={styles.descriptionTitle}>Facilities</Text><Text style={styles.description}>{[['Floodlights', detail.hasFloodlights], ['Parking', detail.hasParking], ['Washroom', detail.hasWashroom], ['Changing room', detail.hasChangingRoom], ['Water', detail.hasWater]].filter(([, present]) => present).map(([name]) => name).join(' · ') || 'None listed'}</Text></View>
             {detailError ? <Text accessibilityRole="alert" style={styles.errorText}>{detailError}</Text> : null}
           </> : null}
         </ScrollView>
-        {detail?.name && detail.status === 'PENDING_REVIEW' ? <View style={styles.modalFooter}>{pendingDecision ? <><Text style={styles.confirmText}>{pendingDecision === 'APPROVED' ? 'Approve this venue and show it to players?' : 'Reject this venue submission?'}</Text><View style={styles.confirmActions}><Pressable accessibilityRole="button" disabled={busy} onPress={() => setPendingDecision(null)} style={styles.rejectButton}><Text style={styles.rejectText}>Cancel</Text></Pressable><Pressable accessibilityRole="button" accessibilityState={{ disabled: busy, busy }} disabled={busy} onPress={() => review(pendingDecision)} style={[styles.approveButton, pendingDecision === 'REJECTED' && styles.confirmRejectButton]}>{busy ? <ActivityIndicator color="#fff"/> : <Text style={styles.approveText}>{pendingDecision === 'APPROVED' ? 'Confirm approval' : 'Confirm rejection'}</Text>}</Pressable></View></> : <View style={styles.confirmActions}><Pressable accessibilityRole="button" accessibilityState={{ disabled: busy }} disabled={busy} onPress={() => confirmReview('REJECTED')} style={styles.rejectButton}><Text style={styles.rejectText}>Reject</Text></Pressable><Pressable accessibilityRole="button" accessibilityState={{ disabled: busy, busy }} disabled={busy} onPress={() => confirmReview('APPROVED')} style={styles.approveButton}><Text style={styles.approveText}>Approve venue</Text></Pressable></View>}</View> : null}
+        {detail?.name && detail.status === 'PENDING_REVIEW' ? <View style={styles.modalFooter}>{pendingDecision ? <><Text style={styles.confirmText}>{pendingDecision === 'APPROVED' ? 'Approve this submission?' : 'Reject this submission?'}</Text>{pendingDecision === 'REJECTED' ? <TextInput accessibilityLabel="Rejection reason" placeholder="Reason for rejection" value={reviewReason} onChangeText={setReviewReason} multiline style={styles.reasonInput} /> : null}<View style={styles.confirmActions}><Pressable accessibilityRole="button" disabled={busy} onPress={() => setPendingDecision(null)} style={styles.rejectButton}><Text style={styles.rejectText}>Cancel</Text></Pressable><Pressable accessibilityRole="button" accessibilityState={{ disabled: busy, busy }} disabled={busy} onPress={() => review(pendingDecision)} style={[styles.approveButton, pendingDecision === 'REJECTED' && styles.confirmRejectButton]}>{busy ? <ActivityIndicator color="#fff"/> : <Text style={styles.approveText}>{pendingDecision === 'APPROVED' ? 'Confirm approval' : 'Confirm rejection'}</Text>}</Pressable></View></> : <View style={styles.confirmActions}><Pressable accessibilityRole="button" accessibilityState={{ disabled: busy }} disabled={busy} onPress={() => confirmReview('REJECTED')} style={styles.rejectButton}><Text style={styles.rejectText}>Reject</Text></Pressable><Pressable accessibilityRole="button" accessibilityState={{ disabled: busy, busy }} disabled={busy} onPress={() => confirmReview('APPROVED')} style={styles.approveButton}><Text style={styles.approveText}>Approve venue</Text></Pressable></View>}</View> : null}
       </SafeAreaView>
     </Modal>
   </SafeAreaView>;
@@ -125,6 +137,7 @@ export default function AdminDashboardScreen() {
 function Metric({ label, value, icon }) { return <View style={styles.metric}><Ionicons name={icon} size={22} color={COLORS.primaryDark}/><Text style={styles.metricValue} numberOfLines={1} adjustsFontSizeToFit>{value}</Text><Text style={styles.metricLabel}>{label}</Text></View>; }
 
 const styles = StyleSheet.create({
+  reasonInput: { minHeight: 64, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, padding: SPACING.md, color: COLORS.textPrimary, backgroundColor: COLORS.background, textAlignVertical: 'top' },
   safe: { flex: 1, backgroundColor: COLORS.background }, content: { padding: SPACING.lg, paddingBottom: SPACING.xxxl },
   successBanner: { backgroundColor: '#E7F5EA', borderRadius: RADIUS.lg, padding: SPACING.md, flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginBottom: SPACING.lg }, successText: { flex: 1, color: COLORS.primaryDark, fontSize: FONT_SIZE.sm, fontWeight: FONT_WEIGHT.semibold },
   queueHeading: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: SPACING.md }, eyebrow: { fontSize: FONT_SIZE.xs, letterSpacing: 1.2, color: COLORS.primaryDark, fontWeight: FONT_WEIGHT.bold }, heading: { fontSize: FONT_SIZE.xxl, color: COLORS.textPrimary, fontWeight: FONT_WEIGHT.bold, marginTop: SPACING.xs }, countBadge: { backgroundColor: '#EAF4ED', borderRadius: RADIUS.pill, paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm }, countText: { color: COLORS.primaryDark, fontSize: FONT_SIZE.xs, fontWeight: FONT_WEIGHT.semibold },

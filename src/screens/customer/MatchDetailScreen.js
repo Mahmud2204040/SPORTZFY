@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 
 import PrimaryButton from '../../components/PrimaryButton';
@@ -24,7 +25,7 @@ const ROLES = ['Goalkeeper', 'Defender', 'Midfielder', 'Striker'];
 
 export default function MatchDetailScreen({ route, navigation }) {
   const { matchId } = route.params || {};
-  const { user } = useAuth();
+  const { user, setPendingDestination } = useAuth();
 
   const [match, setMatch] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -34,6 +35,7 @@ export default function MatchDetailScreen({ route, navigation }) {
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [selectedRole, setSelectedRole] = useState('Goalkeeper');
   const [joining, setJoining] = useState(false);
+  const [decisionBusy, setDecisionBusy] = useState(false);
 
   const isCaptain = user && match && user.id === match.hostUserId;
   const pendingRequests = (match?.joinRequests || []).filter((r) => r.status === 'PENDING');
@@ -60,9 +62,7 @@ export default function MatchDetailScreen({ route, navigation }) {
     }
   }, [matchId]);
 
-  useEffect(() => {
-    fetchMatch();
-  }, [fetchMatch]);
+  useFocusEffect(useCallback(() => { fetchMatch(); }, [fetchMatch]));
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -74,17 +74,12 @@ export default function MatchDetailScreen({ route, navigation }) {
   let matchDateStr = '';
   if (match?.matchTime) {
     const d = new Date(match.matchTime);
-    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    let h = d.getHours();
-    const m = String(d.getMinutes()).padStart(2, '0');
-    const ampm = h >= 12 ? 'PM' : 'AM';
-    h = h % 12 || 12;
-    matchTimeStr = `${h}:${m} ${ampm}`;
-    matchDateStr = `${days[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]}`;
+    matchTimeStr = d.toLocaleTimeString('en-GB', { timeZone: 'Asia/Dhaka', hour: '2-digit', minute: '2-digit' });
+    matchDateStr = d.toLocaleDateString('en-GB', { timeZone: 'Asia/Dhaka', weekday: 'long', day: 'numeric', month: 'short' });
   }
 
   async function handleJoin() {
+    if (joining) return;
     setJoining(true);
     try {
       await matchesApi.joinMatch(matchId, selectedRole);
@@ -99,6 +94,8 @@ export default function MatchDetailScreen({ route, navigation }) {
   }
 
   async function handleDecision(requestId, decision) {
+    if (decisionBusy) return;
+    setDecisionBusy(true);
     try {
       await matchesApi.decideRequest(matchId, requestId, decision);
       Alert.alert(
@@ -108,7 +105,14 @@ export default function MatchDetailScreen({ route, navigation }) {
       fetchMatch();
     } catch (err) {
       Alert.alert('Error', err?.message || 'Could not process decision.');
-    }
+    } finally { setDecisionBusy(false); }
+  }
+
+  function closePost() {
+    Alert.alert('Close recruitment?', 'Players will no longer be able to request a spot.', [
+      { text: 'Keep open', style: 'cancel' },
+      { text: 'Close post', onPress: async () => { try { await matchesApi.closeMatch(matchId); await fetchMatch(); } catch (err) { Alert.alert('Could not close post', err?.message || 'Try again.'); } } },
+    ]);
   }
 
   if (loading) {
@@ -132,7 +136,7 @@ export default function MatchDetailScreen({ route, navigation }) {
     );
   }
 
-  const turfImage = match.turf?.coverImage || 'https://images.unsplash.com/photo-1551958219-acbc608c6377?w=800&q=80';
+  const turfImage = match.turf?.coverImage;
   const openSpots = match.openSpots ?? 0;
   const totalSpots = match.totalSpots ?? 14;
   const isFull = openSpots <= 0;
@@ -148,7 +152,7 @@ export default function MatchDetailScreen({ route, navigation }) {
         }
       >
         {/* Hero image */}
-        <Image source={{ uri: turfImage }} style={styles.hero} />
+        {turfImage ? <Image source={{ uri: turfImage }} style={styles.hero} /> : <View style={styles.hero} />}
 
         {/* Match info */}
         <View style={styles.section}>
@@ -160,6 +164,8 @@ export default function MatchDetailScreen({ route, navigation }) {
           </View>
 
           <Text style={styles.description}>{match.description}</Text>
+          <Text style={styles.description}>Status: {match.status}</Text>
+          {isCaptain && match.status !== 'CLOSED' ? <TouchableOpacity accessibilityRole="button" onPress={closePost}><Text style={styles.description}>Close recruitment</Text></TouchableOpacity> : null}
 
           {/* Info rows */}
           <InfoRow icon="location-outline" value={`${match.turf?.name || 'Unknown'} • ${match.area || ''}`} />
@@ -225,7 +231,7 @@ export default function MatchDetailScreen({ route, navigation }) {
         </View>
 
         {/* Captain review section */}
-        {isCaptain && pendingRequests.length > 0 && (
+        {isCaptain && match.status === 'OPEN' && pendingRequests.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>📋 Pending Requests ({pendingRequests.length})</Text>
             {pendingRequests.map((req) => (
@@ -234,7 +240,7 @@ export default function MatchDetailScreen({ route, navigation }) {
                 player={req.user}
                 role={req.preferredRole}
                 status="PENDING"
-                showActions
+                showActions={!decisionBusy}
                 onAccept={() => handleDecision(req.id, 'ACCEPTED')}
                 onReject={() => handleDecision(req.id, 'REJECTED')}
               />
@@ -246,11 +252,11 @@ export default function MatchDetailScreen({ route, navigation }) {
       </ScrollView>
 
       {/* Join button */}
-      {!isCaptain && !isFull && !hasRequested && (
+      {!isCaptain && match.status === 'OPEN' && !isFull && !hasRequested && (
         <View style={styles.bottomBar}>
           <PrimaryButton
             title={`Join Squad • ৳${match.costPerPlayer ?? 'Free'}/player`}
-            onPress={() => user ? setShowJoinModal(true) : navigation.navigate('SignIn', { redirect: 'MatchDetail', matchId })}
+            onPress={() => user ? setShowJoinModal(true) : (setPendingDestination({ name: 'MatchDetail', params: { matchId } }), navigation.navigate('SignIn'))}
           />
         </View>
       )}
@@ -259,7 +265,7 @@ export default function MatchDetailScreen({ route, navigation }) {
         <View style={styles.bottomBar}>
           <View style={styles.alreadyRequested}>
             <Ionicons name="checkmark-circle" size={20} color={COLORS.success} />
-            <Text style={styles.alreadyRequestedText}>Request sent — waiting for captain</Text>
+            <Text style={styles.alreadyRequestedText}>{match.joinRequests.find(r => r.userId === user?.id)?.status === 'ACCEPTED' ? 'You are in the squad' : 'Request sent — waiting for captain'}</Text>
           </View>
         </View>
       )}

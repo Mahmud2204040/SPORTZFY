@@ -70,7 +70,7 @@ export default function SlotButton({ slot, isSelected, onPress, style }) {
       )}
 
       {/* Price tag */}
-      {price != null && (
+      {price !== null && price !== undefined && (
         <Text style={[styles.price, disabled && styles.bookedText]}>
           ৳{price}
         </Text>
