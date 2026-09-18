@@ -124,51 +124,51 @@ The audit above is the original baseline. The following work has since been impl
 - **Booking:** server-priced demo holds, idempotent confirmation replay, booking detail, cancellation with reason/audit record, expiry/background reconciliation, normalized history, and QR/payment claims removed from the mobile flow.
 - **Owner/admin:** draft and revision workflow, pending-review visibility, admin approve/reject with required reason and audit event, schedule/rate editing, authoritative slot inventory, collision-safe walk-in blocks, and refresh after mutations.
 - **Matches and UX:** privacy-safe match responses, close-match endpoint, Dhaka date/time inputs, duplicate-action guards, shared loading/error/retry states, and booking/match navigation improvements.
-- **Verification completed:** backend and frontend typechecks, mobile lint (zero warnings), backend API lint (zero errors), backend tests (28/28), frontend tests (4/4), Expo dependency check, Android JavaScript export, and normal backend build passed.
+- **Verification completed:** backend and frontend typechecks, mobile lint (zero warnings), backend API lint (zero errors), backend tests (28/28), frontend tests (7/7), Expo dependency check, Android JavaScript export, and normal backend build passed. The isolated CI run [35398299988](https://github.com/Mahmud2204040/SPORTZFY/actions/runs/35398299988) passed migration, seed and live API smoke checks.
 - **Latest additions:** admin user/booking oversight, owner venue gallery URL editing with revision review, approved schedule revisions, owner aggregate metrics, safe read-only database reconnection, combined-filter pagination correction, and CI database/API smoke workflow.
 
 ## Remaining release gates
 
-- Root frontend lint has zero errors/warnings. Backend API lint has zero errors and 10 unused-variable warnings. Full backend lint has 16 errors in the superseded web UI, seed, simulator and concurrency helper.
-- Rehearse migrations against a clean database and deploy the new schema; configure a production `SESSION_SECRET` and production CORS origins. The local Docker daemon is unavailable. The checked-in CI job will attempt the clean rehearsal after push.
-- Execute Android emulator and physical-device journeys, including TalkBack, small-phone layouts, keyboard/back behavior, background/foreground, booking conflicts, owner revision review, and admin moderation. Capture actual results/screenshots.
+- Root frontend lint and backend API lint have zero errors/warnings. Full backend lint has 16 errors in the superseded web UI, seed, simulator and concurrency helper.
+- The CI PostgreSQL service passed clean migration and seed rehearsal. Existing Neon data still needs a backup and baseline-aware migration; configure a production `SESSION_SECRET` and production CORS origins. The local Docker daemon is unavailable.
+- Execute Android emulator and physical-device journeys, including TalkBack, small-phone layouts, keyboard/back behavior, background/foreground, booking conflicts, owner revision review, and admin moderation. Capture actual results/screenshots. The user cannot connect a physical phone now, so this check is **not run**.
 - Add broader integration coverage for ownership, revisions, cancellation, pagination, rate limiting, and concurrency; review remote database reliability observed during the test run.
 - Gallery editing currently accepts image URLs. A storage provider is required for direct photo upload; verify owner insights with representative booking history.
 - Keep production payments, refunds, chat, app-store submission, web redesign, and iOS native verification deferred.
 
-**Current release decision:** implementation is substantially ahead of the baseline audit, but the app is still **not release-ready** until the environment, clean migration, lint, and real Android/accessibility gates pass.
+**Current release decision:** implementation is substantially ahead of the baseline audit, and the native APK/CI gates pass. The app is still **not release-ready** until deployment environment and real Android/accessibility gates pass.
 
 ## Current requirement status overrides
 
-These entries supersede the baseline rows above. IDs not listed retain their baseline status and evidence. `implemented` means code is present; the pending API smoke and device run are not counted as tests.
+These entries supersede the baseline rows above. IDs not listed retain their baseline status and evidence. `implemented` means code is present; isolated CI API smoke is counted where cited, while native device checks are not.
 
 | ID | Current status | Code evidence / remaining verification |
 |---|---|---|
-| FR-TURF-03 | implemented | `backend/app/api/v1/turfs/route.ts` handles combined date, time, format, amenity, quote-price and availability filters; CI API smoke pending. |
+| FR-TURF-03 | tested | `backend/app/api/v1/turfs/route.ts` handles combined date, time, format, amenity, quote-price and availability filters; API smoke passed, native screen check pending. |
 | FR-TURF-04 | implemented | `src/components/TurfCard.js` uses selected-date server summary and unknown status; component test passes. |
 | FR-TURF-05 | implemented | Venue detail has 14 Dhaka dates, slots, gallery, amenities and reviews; device layout pending. |
 | FR-BOOK-01 | tested | `backend/lib/schedule.ts` uses owner rules and legacy fallback; after-midnight unit test passes. |
 | FR-BOOK-05 | implemented | Checkout reconciles changed quote and shows demo/cancellation terms; device test pending. |
-| FR-BOOK-06 | implemented | Unique hold booking and replay handling in booking API; CI API smoke pending. |
+| FR-BOOK-06 | tested | Unique hold booking and replay handling in booking API; isolated API smoke passed. |
 | FR-BOOK-07 | implemented | Paginated booking history normalizes statuses; device test pending. |
 | FR-BOOK-08 | implemented | Persistent booking detail route and screen; device test pending. |
-| FR-BOOK-09 | implemented | Future booking cancellation records reason/actor; CI API smoke pending. |
+| FR-BOOK-09 | tested | Future booking cancellation records reason/actor; isolated API smoke passed. |
 | FR-BOOK-10 | implemented | Player/owner focused and foreground availability refresh; device test pending. |
 | FR-BOOK-11 | implemented | Checkout reconciles expiry and lost response without replaying database writes; failure test pending. |
 | FR-PAY-01 | implemented | Provider-neutral demo capture interface in `backend/lib/payment.ts`. |
-| FR-PAY-04 | implemented | Consumed hold/idempotency replay returns owned booking; CI API smoke pending. |
+| FR-PAY-04 | tested | Consumed hold/idempotency replay returns owned booking; isolated API smoke passed. |
 | FR-PAY-05 | implemented | Mobile flow and API label demo/no charge and suppress QR; web copy remains outside mobile release. |
 | FR-OWN-01 | implemented | Mobile draft creation and owner API. |
-| FR-OWN-03 | implemented | Owner image URL/gallery, format, amenities and schedule editors; direct upload needs storage provider. |
-| FR-OWN-04 | implemented | Draft submit and approved revision review; CI API smoke pending. |
-| FR-OWN-05 | implemented | Weekly rules/rates editor; approved venue changes await admin review. |
+| FR-OWN-03 | tested | Gallery publication and schedule review passed API smoke; owner editors need native device checks and direct upload needs a storage provider. |
+| FR-OWN-04 | tested | Draft submit and approved revision review; isolated API smoke passed. |
+| FR-OWN-05 | tested | Weekly rules/rates persist after admin review in CI API smoke; native editor check remains. |
 | FR-OWN-06 | implemented | Collision-safe walk-in inventory record; device test pending. |
 | FR-OWN-08 | implemented | Owner aggregates use recorded bookings; occupancy stays unavailable rather than invented. |
 | FR-ADM-02 | implemented | Approve/reject confirmation and required rejection reason. |
 | FR-ADM-03 | implemented | Moderation event/revision audit tables and API. |
 | FR-ADM-04 | implemented | Read-only paginated users/bookings screen and admin endpoints. |
 | FR-MATCH-01 | implemented | Dhaka date/time inputs and validation; native usability test pending. |
-| FR-MATCH-02 | implemented | Public match responses project safe fields; CI privacy smoke pending. |
+| FR-MATCH-02 | tested | Public match responses project safe fields; isolated privacy smoke passed. |
 | FR-MATCH-06 | implemented | Host close-post endpoint and mobile action. |
 | FR-COM-01 | implemented | Touched forms validate input and return recoverable errors; full device review pending. |
 | FR-COM-02 | implemented | Core player/owner/admin screens separate loading, empty and error states. |
@@ -177,17 +177,31 @@ These entries supersede the baseline rows above. IDs not listed retain their bas
 | NFR-SEC-04 | implemented | API CORS origin allow-list and bearer session handling; deployed-origin verification pending. |
 | NFR-SEC-05 | implemented | Touched auth, owner, booking and match inputs validate; complete route matrix pending. |
 | NFR-SEC-06 | implemented | Database-backed auth rate limiter; migration and rate-limit integration test pending. |
-| NFR-SEC-08 | implemented | Public match phone/profile fields removed; CI privacy smoke pending. |
-| NFR-REL-02 | implemented | Idempotent booking replay in API; CI smoke pending. |
-| NFR-REL-04 | blocked | Migrations checked in; clean database rehearsal pending because local Docker is unavailable. |
+| NFR-SEC-08 | tested | Public match phone/profile fields removed; isolated privacy smoke passed. |
+| NFR-REL-02 | tested | Idempotent booking replay in API; isolated smoke passed. |
+| NFR-REL-04 | tested | Clean PostgreSQL migration and seed passed in CI; existing Neon baseline deployment remains blocked pending backup/environment review. |
 | NFR-PERF-04 | implemented | Public turf/match and player booking collections use bounded cursor pagination. |
-| NFR-MNT-03 | implemented | Mobile typecheck/lint/Jest and CI workflow added; remote CI run pending. |
+| NFR-MNT-03 | tested | Mobile typecheck/lint/Jest, clean migrations, API smoke, backend build and native APK passed in run 35399209424. |
 | NFR-MNT-04 | blocked | Production session secret/CORS must be configured and checked in deployment. |
 | NFR-MNT-05 | implemented | This audit and CI workflow record mobile scope and release decisions. |
 
 ## Migration and release record
 
 - The connected Neon `Sportzfy` database already has application tables but has **no recorded Prisma migrations**. `prisma migrate status` reports both migrations pending. Do not run the baseline migration against those existing tables. After a backup and environment identification, mark `202609180001_baseline` applied, then deploy `202609180002_mobile_mvp`.
-- Local clean database rehearsal: **not run**. Docker Desktop daemon and local PostgreSQL server are unavailable. CI's PostgreSQL service, migration, seed and API smoke jobs have been authored but have not yet reported a run.
-- Android JavaScript bundle: **passed**. Native APK/emulator/physical-device tests and screenshots: **not run**; Android SDK/ADB is absent on this host.
-- Expo SDK 51 dependency check, backend build, backend tests 28/28, mobile tests 4/4, and both typechecks: **passed**. Full backend lint: **failed** on web/seed/helper files; mobile lint and backend API lint: **passed**.
+- Local clean database rehearsal: **not run** because Docker Desktop and PostgreSQL are unavailable. CI's isolated PostgreSQL migration, seed and API smoke: **passed** in run 35398299988.
+- Android JavaScript bundle, local Expo native prebuild, and CI debug APK build: **passed**. The first CI native build failed because `android.package` was absent; this is fixed in `app.json`. The complete rerun [35399209424](https://github.com/Mahmud2204040/SPORTZFY/actions/runs/35399209424) **passed** and produced the 43.3 MB `sportzfy-android-debug` artifact (SHA-256 `70dd5c910ecd65d00c71f121174b713fbdcec3c3dfd997c754570c9fdb3b85d3`). Emulator, physical-device tests and screenshots: **not run**; Android SDK/ADB is absent on this host and the user cannot connect a phone now.
+- Expo SDK 51 dependency check, backend build, backend tests 28/28, mobile tests 7/7, and both typechecks: **passed**. Full backend lint: **failed** on web/seed/helper files; mobile lint and backend API lint: **passed without warnings**.
+
+### Android acceptance record
+
+| Journey or check | Actual result | Evidence / next action |
+|---|---|---|
+| Guest browsing, role navigation and return after login | Automated navigation tests passed; device journey not run | `src/navigation/RootNavigator.test.js`; verify on emulator/phone. |
+| Combined filters, empty/error state and truthful venue availability | Adapter/card tests and isolated API smoke passed; device journey not run | `src/api/contracts.test.ts`, `src/components/TurfCard.test.js`, `backend/scripts/smoke-mvp.mjs`. |
+| Hold, demo confirmation, replay, booking detail and cancellation | Isolated API smoke passed; touch/background journey not run | `backend/scripts/smoke-mvp.mjs`; verify quote change, expiry and foreground behavior on device. |
+| Owner draft/edit, schedule, walk-in and admin approve/reject | Draft/revision, schedule and gallery API smoke passed in CI; walk-in and device journeys not run | `backend/scripts/smoke-mvp.mjs`; verify walk-in collisions, review card and slot labels on device. |
+| Match request/decision and close | Backend tests and public privacy API smoke passed; mutation/device journey not run | Verify forms, capacity, decisions and refresh on device. |
+| Small-phone, enlarged text, keyboard, Android Back, TalkBack and reduced motion | **Not run** | Android SDK/emulator and a connected physical phone are unavailable on this host. |
+| Android screenshots and physical-device evidence | **Not captured** | Capture after device access is available. |
+
+No emulator or physical-device result is inferred from a JavaScript export, native build, or API test.
