@@ -130,7 +130,7 @@ The audit above is the original baseline. The following work has since been impl
 ## Remaining release gates
 
 - Root frontend lint and backend API lint have zero errors/warnings. Full backend lint has 16 errors in the superseded web UI, seed, simulator and concurrency helper.
-- The CI PostgreSQL service passed clean migration and seed rehearsal. Existing Neon data still needs a backup and baseline-aware migration; configure a production `SESSION_SECRET` and production CORS origins. The local Docker daemon is unavailable.
+- The CI PostgreSQL service passed clean migration and seed rehearsal, and the existing Neon database has now received the baseline-aware mobile migration. Configure a production `SESSION_SECRET` and production CORS origins. The local Docker daemon is unavailable.
 - Execute Android emulator and physical-device journeys, including TalkBack, small-phone layouts, keyboard/back behavior, background/foreground, booking conflicts, owner revision review, and admin moderation. Capture actual results/screenshots. The user cannot connect a physical phone now, so this check is **not run**.
 - Add broader integration coverage for ownership, revisions, cancellation, pagination, rate limiting, and concurrency; review remote database reliability observed during the test run.
 - Gallery editing currently accepts image URLs. A storage provider is required for direct photo upload; verify owner insights with representative booking history.
@@ -176,10 +176,10 @@ These entries supersede the baseline rows above. IDs not listed retain their bas
 | FR-COM-04 | implemented | Mobile demo wording and sample-data labels; remaining web wording is outside mobile gate. |
 | NFR-SEC-04 | implemented | API CORS origin allow-list and bearer session handling; deployed-origin verification pending. |
 | NFR-SEC-05 | implemented | Touched auth, owner, booking and match inputs validate; complete route matrix pending. |
-| NFR-SEC-06 | implemented | Database-backed auth rate limiter; migration and rate-limit integration test pending. |
+| NFR-SEC-06 | implemented | Database-backed auth rate limiter; live schema and three-role login verified, full 429-window integration test pending. |
 | NFR-SEC-08 | tested | Public match phone/profile fields removed; isolated privacy smoke passed. |
 | NFR-REL-02 | tested | Idempotent booking replay in API; isolated smoke passed. |
-| NFR-REL-04 | tested | Clean PostgreSQL migration and seed passed in CI; existing Neon baseline deployment remains blocked pending backup/environment review. |
+| NFR-REL-04 | tested | Clean PostgreSQL migration/seed passed in CI; existing Neon tables were baselined and the additive mobile migration deployed successfully. |
 | NFR-PERF-04 | implemented | Public turf/match and player booking collections use bounded cursor pagination. |
 | NFR-MNT-03 | tested | Mobile typecheck/lint/Jest, clean migrations, API smoke, backend build and native APK passed in run 35399209424. |
 | NFR-MNT-04 | blocked | Production session secret/CORS must be configured and checked in deployment. |
@@ -187,11 +187,12 @@ These entries supersede the baseline rows above. IDs not listed retain their bas
 
 ## Migration and release record
 
-- The connected Neon `Sportzfy` database already has application tables but has **no recorded Prisma migrations**. `prisma migrate status` reports both migrations pending. Do not run the baseline migration against those existing tables. After a backup and environment identification, mark `202609180001_baseline` applied, then deploy `202609180002_mobile_mvp`.
+- On 19 September 2026, the connected Neon `Sportzfy` database's existing tables were recorded with `202609180001_baseline`, then `202609180002_mobile_mvp` was deployed. `prisma migrate status` reports the schema up to date. `AuthRateLimit`, `TurfRevision`, `ModerationEvent`, and `BookingCancellation` are present; existing application data was retained.
 - Local clean database rehearsal: **not run** because Docker Desktop and PostgreSQL are unavailable. CI's isolated PostgreSQL migration, seed and API smoke: **passed** in run 35398299988.
 - Android JavaScript bundle, local Expo native prebuild, and CI debug APK build: **passed**. The first CI native build failed because `android.package` was absent; this is fixed in `app.json`. The complete rerun [35399209424](https://github.com/Mahmud2204040/SPORTZFY/actions/runs/35399209424) **passed** and produced the 43.3 MB `sportzfy-android-debug` artifact (SHA-256 `70dd5c910ecd65d00c71f121174b713fbdcec3c3dfd997c754570c9fdb3b85d3`). Emulator, physical-device tests and screenshots: **not run**; Android SDK/ADB is absent on this host and the user cannot connect a phone now.
 - Expo SDK 51 dependency check, backend build, backend tests 30/30, mobile tests 7/7, and both typechecks: **passed**. Full backend lint: **failed** on web/seed/helper files; mobile lint and backend API lint: **passed without warnings**.
 - Runtime incident on 19 September 2026: Neon briefly rejected connections and the former retry path disconnected the process-wide Prisma client while concurrent reads were active. The reconnect path no longer calls `$disconnect`, shares one `$connect` attempt, retries reads once, and reports persistent availability failures as HTTP 503. The reported Chattogram/date URL returned 200 afterward, including 12/12 parallel requests.
+- Login incident on 19 September 2026: `/auth/login` returned 500 because `AuthRateLimit` was absent from the live database. After baseline-aware migration, CUSTOMER, OWNER, and ADMIN logins each returned 200 with the expected role and session token.
 
 ### Android acceptance record
 
