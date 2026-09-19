@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { isTransientDatabaseError } from "@/lib/database-errors";
 import { calculateDynamicSlotPrice } from "@/lib/pricing";
 import { dhakaDate, dhakaDayStart, scheduleForDate } from "@/lib/schedule";
 
@@ -106,6 +107,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ data: filtered, count: filtered.length, page: { nextCursor, hasMore: !!nextCursor } });
   } catch (error) {
     console.error("Error fetching turfs:", error);
+    if (isTransientDatabaseError(error)) {
+      return NextResponse.json(
+        { error: { code: "SERVICE_UNAVAILABLE", message: "Venue search is temporarily unavailable. Please retry." } },
+        { status: 503, headers: { "Retry-After": "2" } }
+      );
+    }
     return NextResponse.json({ error: { code: "SERVER_ERROR", message: "Failed to fetch turfs" } }, { status: 500 });
   }
 }

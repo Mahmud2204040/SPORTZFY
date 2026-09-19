@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { isTransientDatabaseError } from "@/lib/database-errors";
 
 const safeReadOperations = new Set(["findUnique", "findUniqueOrThrow", "findFirst", "findFirstOrThrow", "findMany", "count", "aggregate", "groupBy"]);
 
@@ -6,6 +7,7 @@ function makePrismaClient() {
   const baseClient = new PrismaClient({
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
   });
+  let reconnectPromise: Promise<void> | null = null;
 
   // Client extension for resilient auto-reconnection on Neon serverless idle socket disconnects
   return baseClient.$extends({
@@ -14,35 +16,23 @@ function makePrismaClient() {
         try {
           return await query(args);
         } catch (caught: unknown) {
-          const error = caught as { message?: string; code?: string };
+          const error = caught as { message?: string };
           const errorMessage = String(error?.message || "");
-          const errorCode = String(error?.code || "");
-          const lower = errorMessage.toLowerCase();
-
-          // Neon / Postgres connections can be dropped when idle.
-          // Prisma error shapes vary, so we match a few common substrings.
-          const isTransientConnectionError =
-            lower.includes("kind: closed") ||
-            lower.includes("error { kind: closed") ||
-            lower.includes("connection closed") ||
-            lower.includes("connection terminated") ||
-            lower.includes("socket closed") ||
-            lower.includes("can't reach database server") ||
-            lower.includes("closed") ||
-            errorCode === "P1001" ||
-            errorCode === "P1017";
 
           // A dropped response can hide a committed write. Never replay a mutation.
-          if (isTransientConnectionError && safeReadOperations.has(operation)) {
+          if (isTransientDatabaseError(caught) && safeReadOperations.has(operation)) {
             console.warn(
               `[Prisma Resilience] Auto-reconnecting after transient socket drop in ${model || "raw"}.${operation}:`,
               errorMessage.slice(0, 100)
             );
 
-            // Re-establish connection cleanly
-            // Reconnect cleanly. If disconnect fails, still try connect.
-            await baseClient.$disconnect().catch(() => {});
-            await baseClient.$connect().catch(() => {});
+            // Do not disconnect here: another request may be using the same
+            // process-wide client. Share one connect attempt across concurrent
+            // read failures, then let Prisma retry the read on its fresh pool.
+            reconnectPromise ??= baseClient.$connect().finally(() => {
+              reconnectPromise = null;
+            });
+            await reconnectPromise.catch(() => {});
 
             // Transparently retry query once.
             return await query(args);
