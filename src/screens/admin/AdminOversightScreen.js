@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -7,7 +7,9 @@ import { adminApi } from '../../api/admin';
 import { COLORS, FONT_SIZE, FONT_WEIGHT, RADIUS, SPACING } from '../../constants/theme';
 
 function dhaka(value) {
-  return new Date(value).toLocaleString('en-GB', { timeZone: 'Asia/Dhaka', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Time unavailable';
+  return date.toLocaleString('en-GB', { timeZone: 'Asia/Dhaka', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
 export default function AdminOversightScreen({ navigation, route }) {
@@ -18,40 +20,52 @@ export default function AdminOversightScreen({ navigation, route }) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
   const [expandedId, setExpandedId] = useState(null);
+  const requestId = useRef(0);
 
   const load = useCallback(async () => {
+    const id = ++requestId.current;
     setLoading(true); setError('');
     try {
       const result = section === 'users' ? await adminApi.getUsers() : await adminApi.getBookings();
+      if (id !== requestId.current) return;
       setItems(result.items); setNextCursor(result.nextCursor);
     } catch (cause) {
+      if (id !== requestId.current) return;
       setItems([]); setNextCursor(null); setError(cause?.message || 'Could not load platform records.');
-    } finally { setLoading(false); }
+    } finally { if (id === requestId.current) setLoading(false); }
   }, [section]);
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(useCallback(() => { load(); return () => { requestId.current += 1; }; }, [load]));
 
   async function loadMore() {
     if (!nextCursor || loadingMore) return;
+    const id = ++requestId.current;
     setLoadingMore(true); setError('');
     try {
       const result = section === 'users' ? await adminApi.getUsers(nextCursor) : await adminApi.getBookings(nextCursor);
+      if (id !== requestId.current) return;
       setItems(current => [...current, ...result.items]); setNextCursor(result.nextCursor);
-    } catch (cause) { setError(cause?.message || 'Could not load more records.'); }
-    finally { setLoadingMore(false); }
+    } catch (cause) { if (id === requestId.current) setError(cause?.message || 'Could not load more records.'); }
+    finally { if (id === requestId.current) setLoadingMore(false); }
+  }
+
+  function selectSection(nextSection) {
+    if (nextSection === section) return;
+    requestId.current += 1;
+    setSection(nextSection); setItems([]); setNextCursor(null); setExpandedId(null); setError(''); setLoading(true); setLoadingMore(false);
   }
 
   return <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
     <View style={styles.header}><Pressable accessibilityRole="button" accessibilityLabel="Back to review queue" onPress={navigation.goBack} style={styles.back}><Ionicons name="arrow-back" size={24} color={COLORS.textPrimary}/></Pressable><View><Text style={styles.eyebrow}>ADMINISTRATION</Text><Text style={styles.title}>Platform oversight</Text></View></View>
-    <View style={styles.tabs}>{[['users', 'Users'], ['bookings', 'Bookings']].map(([key, label]) => <Pressable key={key} accessibilityRole="button" accessibilityState={{ selected: section === key }} onPress={() => { setSection(key); setExpandedId(null); }} style={[styles.tab, section === key && styles.selectedTab]}><Text style={[styles.tabText, section === key && styles.selectedText]}>{label}</Text></Pressable>)}</View>
+    <View style={styles.tabs}>{[['users', 'Users'], ['bookings', 'Bookings']].map(([key, label]) => <Pressable key={key} accessibilityRole="button" accessibilityState={{ selected: section === key }} onPress={() => selectSection(key)} style={[styles.tab, section === key && styles.selectedTab]}><Text style={[styles.tabText, section === key && styles.selectedText]}>{label}</Text></Pressable>)}</View>
     <ScrollView contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={loading && items.length > 0} onRefresh={load} colors={[COLORS.primaryDark]}/>}>
       {loading && items.length === 0 ? <View style={styles.state}><ActivityIndicator color={COLORS.primaryDark}/><Text>Loading {section}…</Text></View> : null}
       {error ? <View style={styles.state}><Text accessibilityRole="alert" style={styles.error}>{error}</Text><Pressable accessibilityRole="button" onPress={load} style={styles.retry}><Text style={styles.retryText}>Retry</Text></Pressable></View> : null}
       {!loading && !error && items.length === 0 ? <View style={styles.state}><Text style={styles.muted}>No {section} recorded.</Text></View> : null}
       {!loading && items.map(item => <Pressable key={item.id} accessibilityRole="button" accessibilityState={{ expanded: expandedId === item.id }} onPress={() => setExpandedId(current => current === item.id ? null : item.id)} style={styles.card}>
-        <View style={styles.cardTop}><Text style={styles.cardTitle}>{section === 'users' ? item.name : item.referenceCode}</Text><Text style={styles.badge}>{section === 'users' ? item.role : item.status.replace(/_/g, ' ')}</Text></View>
-        <Text style={styles.muted}>{section === 'users' ? item.email : `${item.turf.name} · ${item.user.name}`}</Text>
+        <View style={styles.cardTop}><Text style={styles.cardTitle}>{section === 'users' ? item.name || 'Unnamed user' : item.referenceCode || 'Reference unavailable'}</Text><Text style={styles.badge}>{String(section === 'users' ? item.role || 'UNKNOWN' : item.status || 'UNKNOWN').replace(/_/g, ' ')}</Text></View>
+        <Text style={styles.muted}>{section === 'users' ? item.email || 'Email unavailable' : `${item.turf?.name || 'Venue unavailable'} · ${item.user?.name || 'Player unavailable'}`}</Text>
         {expandedId === item.id ? <View style={styles.detail}>
-          {section === 'users' ? <><Text style={styles.muted}>Joined {dhaka(item.createdAt)}</Text><Text style={styles.muted}>{item._count.bookings} bookings · {item._count.turfs} venues</Text></> : <><Text style={styles.muted}>Starts {dhaka(item.startTime)}</Text><Text style={styles.muted}>Ends {dhaka(item.endTime)}</Text><Text style={styles.muted}>Demo booking value ৳{Number(item.totalAmount).toLocaleString('en-BD')}</Text>{item.cancellation?.reason ? <Text style={styles.muted}>Cancellation: {item.cancellation.reason}</Text> : null}</>}
+          {section === 'users' ? <><Text style={styles.muted}>Joined {dhaka(item.createdAt)}</Text><Text style={styles.muted}>{item._count?.bookings ?? 0} bookings · {item._count?.turfs ?? 0} venues</Text></> : <><Text style={styles.muted}>Starts {dhaka(item.startTime)}</Text><Text style={styles.muted}>Ends {dhaka(item.endTime)}</Text><Text style={styles.muted}>Demo booking value ৳{Number(item.totalAmount || 0).toLocaleString('en-BD')}</Text>{item.cancellation?.reason ? <Text style={styles.muted}>Cancellation: {item.cancellation.reason}</Text> : null}</>}
         </View> : null}
       </Pressable>)}
       {nextCursor && !loading ? <Pressable accessibilityRole="button" accessibilityState={{ busy: loadingMore, disabled: loadingMore }} disabled={loadingMore} onPress={loadMore} style={styles.retry}><Text style={styles.retryText}>{loadingMore ? 'Loading…' : 'Load more'}</Text></Pressable> : null}

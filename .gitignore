@@ -15,3 +15,4 @@ web-build/
 android/
 ios/
 .env*
+!backend/.env.example
